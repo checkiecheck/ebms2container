@@ -1,0 +1,225 @@
+# =============================================================================
+# Digikoppeling ebMS2 Adapter – Docker Compose
+#
+# Architectuur: Zero-Trust microservices
+#   - Elke Spring Boot service heeft een eigen geïsoleerde PostgreSQL-instantie
+#   - Interne service-communicatie via het 'ebms-internal' bridge network
+#   - RabbitMQ voor asynchrone AMQP-berichten
+#
+# Opstarten:  docker compose up --build
+# Stoppen:    docker compose down
+# Reset DB:   docker compose down -v
+# =============================================================================
+
+services:
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # PostgreSQL databases – één instantie per microservice (Zero-Trust principe)
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  postgres-orchestrator:
+    image: postgres:16-alpine
+    container_name: ebms-postgres-orchestrator
+    environment:
+      POSTGRES_DB:       ebms_orchestrator
+      POSTGRES_USER:     ebms_orch
+      POSTGRES_PASSWORD: secret_orch
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-orchestrator-data:/var/lib/postgresql/data
+    networks:
+      - ebms-internal
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ebms_orch -d ebms_orchestrator"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  postgres-cpa:
+    image: postgres:16-alpine
+    container_name: ebms-postgres-cpa
+    environment:
+      POSTGRES_DB:       ebms_cpa
+      POSTGRES_USER:     ebms_cpa
+      POSTGRES_PASSWORD: secret_cpa
+    ports:
+      - "5434:5432"
+    volumes:
+      - postgres-cpa-data:/var/lib/postgresql/data
+    networks:
+      - ebms-internal
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ebms_cpa -d ebms_cpa"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  postgres-crypto:
+    image: postgres:16-alpine
+    container_name: ebms-postgres-crypto
+    environment:
+      POSTGRES_DB:       ebms_crypto
+      POSTGRES_USER:     ebms_crypto
+      POSTGRES_PASSWORD: secret_crypto
+    ports:
+      - "5435:5432"
+    volumes:
+      - postgres-crypto-data:/var/lib/postgresql/data
+    networks:
+      - ebms-internal
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ebms_crypto -d ebms_crypto"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # RabbitMQ – AMQP message broker
+  #   Management UI: http://localhost:15672  (ebms_amqp / secret_amqp)
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: ebms-rabbitmq
+    hostname: ebms-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER:  ebms_amqp
+      RABBITMQ_DEFAULT_PASS:  secret_amqp
+      RABBITMQ_DEFAULT_VHOST: ebms
+    ports:
+      - "5672:5672"     # AMQP protocol
+      - "15672:15672"   # Management UI
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    networks:
+      - ebms-internal
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # cpa-service  –  poort 8081
+  # Gestart vóór de orchestrator (CPA-lookup-afhankelijkheid)
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  cpa-service:
+    build:
+      context: .
+      dockerfile: cpa-service/Dockerfile
+    image: ebms/cpa-service:${VERSION:-latest}
+    container_name: ebms-cpa-service
+    environment:
+      SPRING_DATASOURCE_URL:      jdbc:postgresql://postgres-cpa:5432/ebms_cpa
+      SPRING_DATASOURCE_USERNAME: ebms_cpa
+      SPRING_DATASOURCE_PASSWORD: secret_cpa
+      SPRING_PROFILES_ACTIVE:     prod
+    ports:
+      - "8081:8081"
+    depends_on:
+      postgres-cpa:
+        condition: service_healthy
+    networks:
+      - ebms-internal
+    restart: on-failure
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # crypto-service  –  poort 8082
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  crypto-service:
+    build:
+      context: .
+      dockerfile: crypto-service/Dockerfile
+    image: ebms/crypto-service:${VERSION:-latest}
+    container_name: ebms-crypto-service
+    environment:
+      SPRING_DATASOURCE_URL:      jdbc:postgresql://postgres-crypto:5432/ebms_crypto
+      SPRING_DATASOURCE_USERNAME: ebms_crypto
+      SPRING_DATASOURCE_PASSWORD: secret_crypto
+      KEYSTORE_PATH:              /app/keystores/keystore.p12
+      KEYSTORE_PASSWORD:          ${KEYSTORE_PASSWORD:-changeit}
+      TRUSTSTORE_PATH:            /app/keystores/truststore.p12
+      TRUSTSTORE_PASSWORD:        ${TRUSTSTORE_PASSWORD:-changeit}
+      SPRING_PROFILES_ACTIVE:     prod
+    ports:
+      - "8082:8082"
+    depends_on:
+      postgres-crypto:
+        condition: service_healthy
+    volumes:
+      - crypto-keystores:/app/keystores
+    networks:
+      - ebms-internal
+    restart: on-failure
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # ebms-orchestrator  –  poort 8080 (SOAP endpoint)
+  # Start nadat alle afhankelijkheden gezond zijn
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  ebms-orchestrator:
+    build:
+      context: .
+      dockerfile: ebms-orchestrator/Dockerfile
+    image: ebms/ebms-orchestrator:${VERSION:-latest}
+    container_name: ebms-orchestrator
+    environment:
+      SPRING_DATASOURCE_URL:        jdbc:postgresql://postgres-orchestrator:5432/ebms_orchestrator
+      SPRING_DATASOURCE_USERNAME:   ebms_orch
+      SPRING_DATASOURCE_PASSWORD:   secret_orch
+      SPRING_RABBITMQ_HOST:         rabbitmq
+      SPRING_RABBITMQ_PORT:         "5672"
+      SPRING_RABBITMQ_USERNAME:     ebms_amqp
+      SPRING_RABBITMQ_PASSWORD:     secret_amqp
+      SPRING_RABBITMQ_VIRTUAL_HOST: ebms
+      CPA_SERVICE_URL:              http://cpa-service:8081
+      CRYPTO_SERVICE_URL:           http://crypto-service:8082
+      SPRING_PROFILES_ACTIVE:       prod
+    ports:
+      - "8080:8080"   # SOAP endpoint: http://localhost:8080/services
+    depends_on:
+      postgres-orchestrator:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      cpa-service:
+        condition: service_started
+      crypto-service:
+        condition: service_started
+    networks:
+      - ebms-internal
+    restart: on-failure
+
+# =============================================================================
+# Named Volumes
+# =============================================================================
+volumes:
+  postgres-orchestrator-data:
+    name: ebms-postgres-orchestrator-data
+  postgres-cpa-data:
+    name: ebms-postgres-cpa-data
+  postgres-crypto-data:
+    name: ebms-postgres-crypto-data
+  rabbitmq-data:
+    name: ebms-rabbitmq-data
+  crypto-keystores:
+    name: ebms-crypto-keystores
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  ebms-internal:
+    name: ebms-internal
+    driver: bridge

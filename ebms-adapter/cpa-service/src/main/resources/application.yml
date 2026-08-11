@@ -1,0 +1,65 @@
+spring:
+  application:
+    name: cpa-service
+
+  # ── DataSource (eigen PostgreSQL-instantie: Zero-Trust) ───────────────────
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5434/ebms_cpa}
+    username: ${SPRING_DATASOURCE_USERNAME:ebms_cpa}
+    password: ${SPRING_DATASOURCE_PASSWORD:secret_cpa}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      pool-name: cpa-service-pool
+      maximum-pool-size: 20       # Read-heavy: meer connecties
+      minimum-idle: 5
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+
+  # ── JPA / Hibernate ───────────────────────────────────────────────────────
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    open-in-view: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+
+  # ── Flyway ────────────────────────────────────────────────────────────────
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    validate-on-migrate: true
+
+  # ── Caffeine Cache (L1 read-cache voor CPA's en certificaten) ─────────────
+  cache:
+    type: caffeine
+    cache-names:
+      - cpa-by-id
+      - certificates-by-party
+    caffeine:
+      spec: maximumSize=1000,expireAfterWrite=300s
+
+# ── Server ────────────────────────────────────────────────────────────────────
+server:
+  port: 8081
+
+# ── Actuator ──────────────────────────────────────────────────────────────────
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+      probes:
+        enabled: true
+
+info:
+  app:
+    name: cpa-service
+    description: Digikoppeling ebMS2 Adapter – CPA Service
+    version: "@project.version@"

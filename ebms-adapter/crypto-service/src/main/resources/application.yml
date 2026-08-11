@@ -1,0 +1,73 @@
+spring:
+  application:
+    name: crypto-service
+
+  # ── DataSource (geïsoleerde PostgreSQL-instantie: Zero-Trust) ────────────
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5435/ebms_crypto}
+    username: ${SPRING_DATASOURCE_USERNAME:ebms_crypto}
+    password: ${SPRING_DATASOURCE_PASSWORD:secret_crypto}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      pool-name: crypto-service-pool
+      maximum-pool-size: 5        # CPU-intensieve operaties; beperkt parallellisme
+      minimum-idle: 2
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+
+  # ── JPA / Hibernate ───────────────────────────────────────────────────────
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    open-in-view: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+
+  # ── Flyway ────────────────────────────────────────────────────────────────
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    validate-on-migrate: true
+
+# ── Server ────────────────────────────────────────────────────────────────────
+server:
+  port: 8082
+
+# ── Crypto / KeyStore configuratie ────────────────────────────────────────────
+ebms:
+  crypto:
+    keystore:
+      path: ${KEYSTORE_PATH:/app/keystores/keystore.p12}
+      password: ${KEYSTORE_PASSWORD:changeit}
+      type: PKCS12
+    truststore:
+      path: ${TRUSTSTORE_PATH:/app/keystores/truststore.p12}
+      password: ${TRUSTSTORE_PASSWORD:changeit}
+      type: PKCS12
+    algorithms:
+      signature: RSA-SHA256           # Primair: RSA met SHA-256
+      signature-alt: ECDSA-SHA256     # Alternatief: ECDSA
+      key-transport: RSA-OAEP         # XML-Enc sleutelinkapseling
+      data-encryption: AES-256-GCM    # XML-Enc data-encryptie
+
+# ── Actuator ──────────────────────────────────────────────────────────────────
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: always
+      probes:
+        enabled: true
+
+info:
+  app:
+    name: crypto-service
+    description: Digikoppeling ebMS2 Adapter – Crypto Service (XML-DSig / XML-Enc)
+    version: "@project.version@"

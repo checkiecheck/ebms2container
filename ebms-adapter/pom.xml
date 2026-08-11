@@ -1,0 +1,326 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>nl.logius.ebms</groupId>
+    <artifactId>ebms-parent</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+    <packaging>pom</packaging>
+
+    <name>Digikoppeling ebMS2 Adapter – Parent</name>
+    <description>
+        Container-native Digikoppeling ebMS2 adapter conform Koppelvlakstandaard v3.3.2
+        en ISO 15000 (OASIS ebXML Messaging Services v2.0).
+        Maven multi-module project – Zero-Trust microservices-architectuur.
+    </description>
+    <url>https://www.logius.nl/diensten/digikoppeling</url>
+
+    <organization>
+        <name>Logius – Ministerie van Binnenlandse Zaken en Koninkrijksrelaties</name>
+        <url>https://www.logius.nl</url>
+    </organization>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         Submodules
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <modules>
+        <module>ebms-common</module>
+        <module>ebms-orchestrator</module>
+        <module>cpa-service</module>
+        <module>crypto-service</module>
+    </modules>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         Globale properties
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <properties>
+        <!-- Java -->
+        <java.version>21</java.version>
+        <maven.compiler.source>21</maven.compiler.source>
+        <maven.compiler.target>21</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+
+        <!-- Spring Boot -->
+        <spring-boot.version>3.4.1</spring-boot.version>
+
+        <!-- Apache CXF (SOAP 1.1 / JAX-WS / MTOM) -->
+        <cxf.version>4.0.4</cxf.version>
+
+        <!-- XML Security: DSig + Enc + C14N -->
+        <santuario.version>3.0.4</santuario.version>
+
+        <!-- Bouncy Castle (PKI / certificaatverwerking) -->
+        <bouncy-castle.version>1.78.1</bouncy-castle.version>
+
+        <!-- Code-generatie -->
+        <lombok.version>1.18.36</lombok.version>
+        <mapstruct.version>1.6.3</mapstruct.version>
+
+        <!-- Maven-plugins -->
+        <maven-compiler-plugin.version>3.13.0</maven-compiler-plugin.version>
+        <maven-surefire-plugin.version>3.5.2</maven-surefire-plugin.version>
+        <maven-failsafe-plugin.version>3.5.2</maven-failsafe-plugin.version>
+        <maven-enforcer-plugin.version>3.5.0</maven-enforcer-plugin.version>
+        <jacoco-maven-plugin.version>0.8.12</jacoco-maven-plugin.version>
+    </properties>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         Dependency Management (BOM-imports + versie-pinning)
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <dependencyManagement>
+        <dependencies>
+
+            <!-- Spring Boot BOM – beheert vrijwel alle Spring/Hibernate/Jackson versies -->
+            <dependency>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-dependencies</artifactId>
+                <version>${spring-boot.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+
+            <!-- ── Interne modules ───────────────────────────────────────── -->
+            <dependency>
+                <groupId>nl.logius.ebms</groupId>
+                <artifactId>ebms-common</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <!-- ── Apache CXF ───────────────────────────────────────────── -->
+            <!-- SOAP 1.1 endpoint, WSDL-generatie, MTOM-attachments        -->
+            <dependency>
+                <groupId>org.apache.cxf</groupId>
+                <artifactId>cxf-spring-boot-starter-jaxws</artifactId>
+                <version>${cxf.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.cxf</groupId>
+                <artifactId>cxf-rt-transports-http</artifactId>
+                <version>${cxf.version}</version>
+            </dependency>
+            <!-- WS-Security handler (voor toekomstige integratie) -->
+            <dependency>
+                <groupId>org.apache.cxf</groupId>
+                <artifactId>cxf-rt-ws-security</artifactId>
+                <version>${cxf.version}</version>
+            </dependency>
+
+            <!-- ── Apache Santuario (XML Security) ──────────────────────── -->
+            <!-- XML-C14N, XML-DSig (RSA/ECC), XML-Enc                      -->
+            <dependency>
+                <groupId>org.apache.santuario</groupId>
+                <artifactId>xmlsec</artifactId>
+                <version>${santuario.version}</version>
+            </dependency>
+
+            <!-- ── Bouncy Castle ────────────────────────────────────────── -->
+            <!-- JCE provider voor PKI (certificaten, PKCS12)               -->
+            <dependency>
+                <groupId>org.bouncycastle</groupId>
+                <artifactId>bcprov-jdk18on</artifactId>
+                <version>${bouncy-castle.version}</version>
+            </dependency>
+            <!-- PKIX / CMS / OCSP                                          -->
+            <dependency>
+                <groupId>org.bouncycastle</groupId>
+                <artifactId>bcpkix-jdk18on</artifactId>
+                <version>${bouncy-castle.version}</version>
+            </dependency>
+
+            <!-- ── Lombok ───────────────────────────────────────────────── -->
+            <dependency>
+                <groupId>org.projectlombok</groupId>
+                <artifactId>lombok</artifactId>
+                <version>${lombok.version}</version>
+                <scope>provided</scope>
+            </dependency>
+
+            <!-- ── MapStruct ────────────────────────────────────────────── -->
+            <dependency>
+                <groupId>org.mapstruct</groupId>
+                <artifactId>mapstruct</artifactId>
+                <version>${mapstruct.version}</version>
+            </dependency>
+
+        </dependencies>
+    </dependencyManagement>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         Gedeelde dependencies (geërfd door ALLE submodules)
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <dependencies>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         Plugin Management
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <build>
+        <pluginManagement>
+            <plugins>
+
+                <!-- Spring Boot Maven Plugin -->
+                <plugin>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-maven-plugin</artifactId>
+                    <version>${spring-boot.version}</version>
+                    <configuration>
+                        <excludes>
+                            <exclude>
+                                <groupId>org.projectlombok</groupId>
+                                <artifactId>lombok</artifactId>
+                            </exclude>
+                        </excludes>
+                    </configuration>
+                </plugin>
+
+                <!-- Java-compiler met Lombok + MapStruct annotation processing -->
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-compiler-plugin</artifactId>
+                    <version>${maven-compiler-plugin.version}</version>
+                    <configuration>
+                        <release>21</release>
+                        <parameters>true</parameters>
+                        <annotationProcessorPaths>
+                            <path>
+                                <groupId>org.projectlombok</groupId>
+                                <artifactId>lombok</artifactId>
+                                <version>${lombok.version}</version>
+                            </path>
+                            <path>
+                                <groupId>org.mapstruct</groupId>
+                                <artifactId>mapstruct-processor</artifactId>
+                                <version>${mapstruct.version}</version>
+                            </path>
+                        </annotationProcessorPaths>
+                    </configuration>
+                </plugin>
+
+                <!-- Unit-tests (JUnit 5 / Surefire) -->
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-surefire-plugin</artifactId>
+                    <version>${maven-surefire-plugin.version}</version>
+                    <configuration>
+                        <argLine>--add-opens java.base/java.lang=ALL-UNNAMED</argLine>
+                    </configuration>
+                </plugin>
+
+                <!-- Integratietests (Failsafe) -->
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-failsafe-plugin</artifactId>
+                    <version>${maven-failsafe-plugin.version}</version>
+                </plugin>
+
+                <!-- Code-coverage (JaCoCo) -->
+                <plugin>
+                    <groupId>org.jacoco</groupId>
+                    <artifactId>jacoco-maven-plugin</artifactId>
+                    <version>${jacoco-maven-plugin.version}</version>
+                    <executions>
+                        <execution>
+                            <goals>
+                                <goal>prepare-agent</goal>
+                            </goals>
+                        </execution>
+                        <execution>
+                            <id>report</id>
+                            <phase>verify</phase>
+                            <goals>
+                                <goal>report</goal>
+                            </goals>
+                        </execution>
+                    </executions>
+                </plugin>
+
+                <!-- Build-vereisten afdwingen (Java + Maven versie) -->
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-enforcer-plugin</artifactId>
+                    <version>${maven-enforcer-plugin.version}</version>
+                    <executions>
+                        <execution>
+                            <id>enforce-versions</id>
+                            <goals>
+                                <goal>enforce</goal>
+                            </goals>
+                            <configuration>
+                                <rules>
+                                    <requireJavaVersion>
+                                        <version>[21,)</version>
+                                    </requireJavaVersion>
+                                    <requireMavenVersion>
+                                        <version>[3.9,)</version>
+                                    </requireMavenVersion>
+                                </rules>
+                            </configuration>
+                        </execution>
+                    </executions>
+                </plugin>
+
+            </plugins>
+        </pluginManagement>
+
+        <!-- Activeer de enforcer voor alle builds -->
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         Profielen
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <profiles>
+        <!-- Bouw OCI/Docker-images via Spring Boot Maven Plugin (Paketo Buildpacks) -->
+        <profile>
+            <id>docker</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.springframework.boot</groupId>
+                        <artifactId>spring-boot-maven-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>build-image</id>
+                                <goals>
+                                    <goal>build-image</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+
+        <!-- Snel local-development profiel: skip tests + docs -->
+        <profile>
+            <id>fast</id>
+            <properties>
+                <skipTests>true</skipTests>
+                <maven.javadoc.skip>true</maven.javadoc.skip>
+            </properties>
+        </profile>
+    </profiles>
+
+</project>

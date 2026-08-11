@@ -1,0 +1,98 @@
+spring:
+  application:
+    name: ebms-orchestrator
+
+  # ── DataSource (PostgreSQL) ───────────────────────────────────────────────
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5433/ebms_orchestrator}
+    username: ${SPRING_DATASOURCE_USERNAME:ebms_orch}
+    password: ${SPRING_DATASOURCE_PASSWORD:secret_orch}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      pool-name: ebms-orch-pool
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+
+  # ── JPA / Hibernate ───────────────────────────────────────────────────────
+  jpa:
+    hibernate:
+      ddl-auto: validate        # Flyway beheert het schema; Hibernate alleen valideren
+    show-sql: false
+    open-in-view: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: false
+        default_schema: public
+
+  # ── Flyway ────────────────────────────────────────────────────────────────
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    validate-on-migrate: true
+
+  # ── RabbitMQ (AMQP) ───────────────────────────────────────────────────────
+  rabbitmq:
+    host: ${SPRING_RABBITMQ_HOST:localhost}
+    port: ${SPRING_RABBITMQ_PORT:5672}
+    username: ${SPRING_RABBITMQ_USERNAME:ebms_amqp}
+    password: ${SPRING_RABBITMQ_PASSWORD:secret_amqp}
+    virtual-host: ${SPRING_RABBITMQ_VIRTUAL_HOST:ebms}
+    listener:
+      simple:
+        acknowledge-mode: manual
+        retry:
+          enabled: true
+          max-attempts: 3
+          initial-interval: 2000
+
+# ── Server ────────────────────────────────────────────────────────────────────
+server:
+  port: 8080
+  servlet:
+    context-path: /
+
+# ── Apache CXF SOAP endpoint ──────────────────────────────────────────────────
+cxf:
+  path: /services
+  servlet:
+    init:
+      service-list-path: /services
+
+# ── Interne service-URL's (intern Kubernetes DNS) ─────────────────────────────
+ebms:
+  cpa-service-url: ${CPA_SERVICE_URL:http://localhost:8081}
+  crypto-service-url: ${CRYPTO_SERVICE_URL:http://localhost:8082}
+  reliable-messaging:
+    retry-interval-seconds: 60
+    max-retries: 3
+    duplicate-window-hours: 24
+
+# ── Actuator / health ─────────────────────────────────────────────────────────
+management:
+  server:
+    port: 8080
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+      base-path: /actuator
+  endpoint:
+    health:
+      show-details: always
+      probes:
+        enabled: true
+  info:
+    env:
+      enabled: true
+
+info:
+  app:
+    name: ebms-orchestrator
+    description: Digikoppeling ebMS2 Adapter – Orchestrator
+    version: "@project.version@"
+    digikoppeling-version: "3.3.2"

@@ -1,0 +1,63 @@
+# Maven
+target/
+*.class
+*.jar
+!**/src/main/**/*.jar
+*.war
+*.ear
+*.zip
+*.tar.gz
+*.rar
+
+# Maven wrapper
+.mvn/wrapper/maven-wrapper.jar
+
+# IDE – IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# IDE – VS Code
+.vscode/
+*.code-workspace
+
+# IDE – Eclipse
+.classpath
+.project
+.settings/
+bin/
+
+# Spring Boot
+spring-shell.log
+*.log
+logs/
+
+# Docker
+.dockerignore
+
+# Credentials en sleutels – NOOIT committen!
+*.p12
+*.jks
+*.pem
+*.key
+*.crt
+*.pfx
+.env
+.env.*
+!.env.example
+secrets/
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Build caches
+.gradle/
+build/
