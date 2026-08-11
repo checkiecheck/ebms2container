@@ -17,14 +17,31 @@ public class RestClientConfig {
     @Value("${ebms.cpa-service-url}")
     private String cpaServiceUrl;
 
+    @Value("${ebms.crypto-service-url}")
+    private String cryptoServiceUrl;
+
     /**
      * RestClient geconfigureerd voor aanroepen naar de cpa-service.
-     * Base-URL: configureerbaar via {@code ebms.cpa-service-url}.
      */
     @Bean("cpaRestClient")
     public RestClient cpaRestClient() {
         return RestClient.builder()
             .baseUrl(cpaServiceUrl)
+            .defaultHeader("Accept",       "application/json")
+            .defaultHeader("Content-Type", "application/json")
+            .build();
+    }
+
+    /**
+     * RestClient geconfigureerd voor aanroepen naar de crypto-service (Zero-Trust).
+     *
+     * <p>De orchestrator heeft <strong>nooit</strong> directe toegang tot keystores of
+     * private keys – alle cryptografische bewerkingen lopen via deze client.
+     */
+    @Bean("cryptoRestClient")
+    public RestClient cryptoRestClient() {
+        return RestClient.builder()
+            .baseUrl(cryptoServiceUrl)
             .defaultHeader("Accept",       "application/json")
             .defaultHeader("Content-Type", "application/json")
             .build();

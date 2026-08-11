@@ -12,6 +12,9 @@ public enum MessageStatus {
     /** Wordt momenteel verwerkt door de orchestrator. */
     PROCESSING,
 
+    /** Bericht verzonden naar de partner; wacht op ebMS2 Acknowledgment (rm-profielen). */
+    SENT,
+
     /** Succesvol afgeleverd aan de backoffice / doorstuursysteem. */
     DELIVERED,
 

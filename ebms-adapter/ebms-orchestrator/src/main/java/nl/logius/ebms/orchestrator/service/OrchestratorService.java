@@ -136,7 +136,41 @@ public class OrchestratorService {
 
     // ── Scheduled taken ───────────────────────────────────────────────────
 
-    /** Detecteer en markeer verlopen berichten (elk uur). */
+    /**
+     * Verwerkt een inkomende ebMS2 {@code Acknowledgment} (ACK).
+     *
+     * <p>Reliable Messaging status-machine:
+     * Zoekt het originele bericht via {@code RefToMessageId} op en zet de status
+     * van {@code SENT} naar {@code DELIVERED}. Pas op dit moment is het bericht
+     * als definitief afgeleverd beschouwd conform Digikoppeling Koppelvlakstandaard.
+     *
+     * @param refToMessageId het {@code RefToMessageId} uit de inkomende ACK-header
+     * @return SOAP response (leeg 200 OK)
+     */
+    @Transactional
+    public SOAPMessage handleAcknowledgment(String refToMessageId) {
+        log.info("[ACK] Acknowledgment ontvangen voor messageId={}", refToMessageId);
+
+        messageRepository.findByMessageIdAndStatus(refToMessageId, MessageStatus.SENT)
+            .ifPresentOrElse(entity -> {
+                entity.setStatus(MessageStatus.DELIVERED);
+                messageRepository.save(entity);
+                log.info("[ACK] Bericht {} bijgewerkt naar DELIVERED", refToMessageId);
+
+                publishAudit(AuditEvent.builder()
+                    .eventType("MESSAGE_ACKNOWLEDGED")
+                    .messageId(refToMessageId)
+                    .conversationId(entity.getConversationId())
+                    .cpaId(entity.getCpaId())
+                    .result("SUCCESS")
+                    .build());
+            }, () -> {
+                // Kan al DELIVERED zijn (dubbele ACK) of nooit verzonden zijn – log alleen
+                log.warn("[ACK] Geen SENT-bericht gevonden voor refToMessageId={}", refToMessageId);
+            });
+
+        return soapHelper.createEmptyResponse();
+    }
     @Scheduled(fixedDelayString = "PT1H")
     @Transactional
     public void expireMessages() {

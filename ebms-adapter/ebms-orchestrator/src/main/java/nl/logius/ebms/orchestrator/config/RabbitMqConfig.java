@@ -1,6 +1,7 @@
 package nl.logius.ebms.orchestrator.config;
 
 import org.springframework.amqp.core.*;
+import org.springframework.amqp.rabbit.config.SimpleRabbitListenerContainerFactory;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.amqp.support.converter.Jackson2JsonMessageConverter;
@@ -97,6 +98,27 @@ public class RabbitMqConfig {
     @Bean
     public Binding auditBinding(Queue auditQueue, DirectExchange ebmsExchange) {
         return BindingBuilder.bind(auditQueue).to(ebmsExchange).with(ROUTING_AUDIT);
+    }
+
+    // ── Listener Container Factory (manual ack) ───────────────────────────────
+
+    /**
+     * Configureert manual acknowledgment mode voor alle {@code @RabbitListener} methoden.
+     *
+     * <p>Vereist voor de retry/nack-logica in {@link nl.logius.ebms.orchestrator.service.OutboundMessageService}:
+     * bij een {@link nl.logius.ebms.common.exception.EbmsException} kan het bericht via
+     * {@code channel.basicNack(deliveryTag, false, true)} opnieuw in de queue worden geplaatst
+     * in plaats van automatisch te worden verwijderd.
+     */
+    @Bean
+    public SimpleRabbitListenerContainerFactory rabbitListenerContainerFactory(
+            ConnectionFactory connectionFactory,
+            MessageConverter jsonMessageConverter) {
+        SimpleRabbitListenerContainerFactory factory = new SimpleRabbitListenerContainerFactory();
+        factory.setConnectionFactory(connectionFactory);
+        factory.setMessageConverter(jsonMessageConverter);
+        factory.setAcknowledgeMode(AcknowledgeMode.MANUAL);
+        return factory;
     }
 
     // ── Jackson JSON message converter ────────────────────────────────────────

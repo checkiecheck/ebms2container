@@ -1,7 +1,9 @@
 package nl.logius.ebms.orchestrator.service;
 
 import lombok.extern.slf4j.Slf4j;
+import nl.logius.ebms.common.exception.EbmsException;
 import nl.logius.ebms.common.model.cpa.CpaDto;
+import nl.logius.ebms.common.model.cpa.DeliveryChannelDto;
 import nl.logius.ebms.common.model.cpa.PartyInfoDto;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.ParameterizedTypeReference;
@@ -96,4 +98,39 @@ public class CpaValidationService {
 
         return CpaValidationResult.success(cpa);
     }
-}
+
+    /**
+     * Haalt het afleverkanaal op voor een specifieke CPA en ontvangende partij.
+     * Gebruikt door de orchestrator vóór het versturen van een uitgaand bericht.
+     *
+     * @param cpaId     de CPA-identifier
+     * @param toPartyId partij-ID van de ontvanger
+     * @return {@link DeliveryChannelDto} met endpoint-URL, DK-profiel en RM-parameters
+     * @throws EbmsException als het kanaal niet gevonden wordt of de service onbereikbaar is
+     */
+    public DeliveryChannelDto getDeliveryChannel(String cpaId, String toPartyId) {
+        log.debug("[CPA] Afleverkanaal opzoeken: cpaId={} toPartyId={}", cpaId, toPartyId);
+        try {
+            DeliveryChannelDto channel = cpaRestClient.get()
+                .uri("/api/cpa/{cpaId}/channels/{partyId}", cpaId, toPartyId)
+                .retrieve()
+                .body(DeliveryChannelDto.class);
+
+            if (channel == null || channel.getEndpointUrl() == null) {
+                throw new EbmsException("CHANNEL_NOT_FOUND",
+                    "Geen geldig afleverkanaal voor CPA=" + cpaId + " party=" + toPartyId);
+            }
+            log.debug("[CPA] Afleverkanaal gevonden: {}", channel.getEndpointUrl());
+            return channel;
+
+        } catch (HttpClientErrorException.NotFound e) {
+            throw new EbmsException("CHANNEL_NOT_FOUND",
+                "Afleverkanaal niet gevonden: CPA=" + cpaId + " party=" + toPartyId);
+        } catch (EbmsException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("[CPA] cpa-service onbereikbaar bij kanaal-lookup: {}", e.getMessage());
+            throw new EbmsException("CPA_SERVICE_UNAVAILABLE",
+                "cpa-service onbereikbaar voor kanaal-lookup: " + e.getMessage());
+        }
+    }

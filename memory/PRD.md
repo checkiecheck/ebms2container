@@ -125,6 +125,46 @@ Bouwen van een moderne ebMS2 adapter conform:
 
 ---
 
+### Fase 4 (voltooid – februari 2026)
+
+#### CryptoServiceClient – Zero-Trust HTTP-facade (ebms-orchestrator)
+- [x] `CryptoServiceClient.java` – sign(), verify(), encrypt(), decrypt() via RestClient
+- [x] `cryptoRestClient` @Bean toegevoegd aan `RestClientConfig`
+- [x] HTTP 4xx/5xx vertaald naar `XmlSecurityException`
+- [x] 4 crypto-DTO's verplaatst naar `ebms-common`: `SignResponse`, `VerifyResponse`, `EncryptResponse`, `DecryptResponse`
+
+#### OutboundSoapClient – CXF Dispatch SOAP-client (ebms-orchestrator)
+- [x] `OutboundSoapClient.java` – CXF `Dispatch<SOAPMessage>` Message mode, geen WSDL
+- [x] Configureerbare timeouts via CXF `HTTPConduit` (`HTTPClientPolicy`)
+- [x] Optionele mTLS `SSLContext` injectie (PKIoverheid-certificaten)
+- [x] SOAP Fault detectie → `EbmsException`
+
+#### OutboundMessageService – Asynchrone AMQP pipeline (ebms-orchestrator)
+- [x] `OutboundMessageService.java` – `@RabbitListener(QUEUE_OUTBOUND)` met manual ack
+- [x] `CpaChannelCacheService.java` – aparte `@Service` voor `@Cacheable` CPA-kanaal lookup (AOP proxy-fix)
+- [x] Pipeline: CPA-lookup → signing → encryptie → verzenden → status-bijwerken
+- [x] Status-machine: Best Effort → `DELIVERED`, Reliable Messaging → `SENT`
+- [x] `RabbitMqConfig` uitgebreid met `SimpleRabbitListenerContainerFactory` (manual ack mode)
+- [x] Caffeine cache geconfigureerd (`spring.cache.caffeine.spec`)
+
+#### ACK-verwerking – Reliable Messaging completering (ebms-orchestrator)
+- [x] `SoapHelper.isAcknowledgment()` + `parseRefToMessageId()` – ACK-detectie in SOAP header
+- [x] `SoapHelper.buildOutboundSoap()` – SOAP-envelop opbouwen vanuit `EbxmlMessageHeader`
+- [x] `OrchestratorService.handleAcknowledgment()` – status `SENT` → `DELIVERED` via `RefToMessageId`
+- [x] `EbmsMessageProvider` – ACK-routering vóór normale berichtverwerking
+
+#### cpa-service uitbreiding
+- [x] `CpaDeliveryChannelEntity.java` + `CpaDeliveryChannelRepository.java`
+- [x] `CpaService.findDeliveryChannel()`, `findDeliveryChannels()`, `addDeliveryChannel()`
+- [x] `CpaController`: `GET /api/cpa/{cpaId}/channels`, `GET /api/cpa/{cpaId}/channels/{partyId}`, `POST /api/cpa/{cpaId}/channels`
+- [x] `CpaMapper.toChannelDto()` + `toChannelDtoList()`
+
+#### Flyway + DB
+- [x] `V2__add_sent_status.sql` – PostgreSQL ENUM uitgebreid met `SENT`
+- [x] `MessageStatus.SENT` toegevoegd aan Java enum
+
+---
+
 ## Geprioriteerde Backlog
 
 ### P0 – Fase 4: auditor-service (NIEUW)

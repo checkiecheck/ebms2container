@@ -59,6 +59,117 @@ public class SoapHelper {
             .build();
     }
 
+    // ── ACK-detectie ──────────────────────────────────────────────────────────
+
+    /**
+     * Detecteert of een SOAP-bericht een ebMS2 {@code Acknowledgment} is.
+     * Inkomende ACK's worden gebruikt om de status van uitgaande rm-berichten op DELIVERED te zetten.
+     */
+    public boolean isAcknowledgment(SOAPHeader soapHeader) {
+        if (soapHeader == null) return false;
+        return soapHeader.getElementsByTagNameNS(EBXML_MSG_NS, "Acknowledgment").getLength() > 0;
+    }
+
+    /**
+     * Parseert het {@code RefToMessageId} uit een inkomend ACK-bericht.
+     * Dit is het MessageId van het originele uitgaande bericht.
+     */
+    public String parseRefToMessageId(SOAPHeader soapHeader) {
+        NodeList acks = soapHeader.getElementsByTagNameNS(EBXML_MSG_NS, "Acknowledgment");
+        if (acks.getLength() == 0) return null;
+        Element ack = (Element) acks.item(0);
+        return getChildText(ack, "RefToMessageId");
+    }
+
+    // ── Uitgaand bericht opbouwen ─────────────────────────────────────────────
+
+    /**
+     * Construeert een SOAP 1.1 envelop vanuit een {@link EbxmlMessageHeader} voor uitgaande berichten.
+     *
+     * <p>Voegt de volledige ebXML MessageHeader toe inclusief optioneel {@code AckRequested}-element
+     * (bij rm-profielen). Het bericht is daarna klaar voor signing/encryptie via de crypto-service.
+     *
+     * @param header ebXML MessageHeader DTO (van de backoffice)
+     * @param requireAck of een Acknowledgment gevraagd moet worden (rm-profielen)
+     * @return volledig gevuld {@link SOAPMessage}
+     */
+    public SOAPMessage buildOutboundSoap(EbxmlMessageHeader header, boolean requireAck) {
+        try {
+            MessageFactory mf = MessageFactory.newInstance();
+            SOAPMessage msg   = mf.createMessage();
+            SOAPEnvelope env  = msg.getSOAPPart().getEnvelope();
+            SOAPHeader   sh   = msg.getSOAPHeader();
+
+            // ── MessageHeader element ──────────────────────────────────────
+            SOAPElement mh = sh.addChildElement("MessageHeader", "eb", EBXML_MSG_NS);
+            mh.addAttribute(env.createName("mustUnderstand", "SOAP-ENV", SOAP_ENV_NS), "1");
+            mh.addAttribute(env.createName("version", "eb", EBXML_MSG_NS), "2.0");
+
+            addChild(mh, "CPAId",          EBXML_MSG_NS, header.getCpaId());
+            addChild(mh, "ConversationId", EBXML_MSG_NS, header.getConversationId());
+
+            // From
+            SOAPElement from = mh.addChildElement("From", "eb", EBXML_MSG_NS);
+            if (header.getFrom() != null) {
+                for (PartyId pid : header.getFrom()) {
+                    SOAPElement partyEl = from.addChildElement("PartyId", "eb", EBXML_MSG_NS);
+                    if (pid.getType() != null && !pid.getType().isBlank()) {
+                        partyEl.addAttribute(env.createName("type", "eb", EBXML_MSG_NS), pid.getType());
+                    }
+                    partyEl.addTextNode(pid.getValue());
+                }
+            }
+
+            // To
+            SOAPElement to = mh.addChildElement("To", "eb", EBXML_MSG_NS);
+            if (header.getTo() != null) {
+                for (PartyId pid : header.getTo()) {
+                    SOAPElement partyEl = to.addChildElement("PartyId", "eb", EBXML_MSG_NS);
+                    if (pid.getType() != null && !pid.getType().isBlank()) {
+                        partyEl.addAttribute(env.createName("type", "eb", EBXML_MSG_NS), pid.getType());
+                    }
+                    partyEl.addTextNode(pid.getValue());
+                }
+            }
+
+            // Service
+            SOAPElement svc = mh.addChildElement("Service", "eb", EBXML_MSG_NS);
+            if (header.getService() != null) {
+                if (header.getService().getType() != null) {
+                    svc.addAttribute(
+                        env.createName("type", "eb", EBXML_MSG_NS), header.getService().getType());
+                }
+                svc.addTextNode(header.getService().getValue());
+            }
+
+            addChild(mh, "Action", EBXML_MSG_NS, header.getAction());
+
+            // MessageInfo
+            SOAPElement mi = mh.addChildElement("MessageInfo", "eb", EBXML_MSG_NS);
+            addChild(mi, "Timestamp", EBXML_MSG_NS, Instant.now().toString());
+            addChild(mi, "MessageId", EBXML_MSG_NS,
+                header.getMessageInfo() != null && header.getMessageInfo().getMessageId() != null
+                    ? header.getMessageInfo().getMessageId()
+                    : UUID.randomUUID() + "@ebms-orchestrator");
+
+            // AckRequested (optioneel, rm-profielen)
+            if (requireAck) {
+                SOAPElement ackReq = sh.addChildElement("AckRequested", "eb", EBXML_MSG_NS);
+                ackReq.addAttribute(env.createName("mustUnderstand", "SOAP-ENV", SOAP_ENV_NS), "1");
+                ackReq.addAttribute(env.createName("signed", "eb", EBXML_MSG_NS), "false");
+                ackReq.addAttribute(
+                    env.createName("actor", "", ""), "urn:oasis:names:tc:ebxml-msg:actor:nextMSH");
+            }
+
+            msg.saveChanges();
+            return msg;
+
+        } catch (Exception e) {
+            log.error("Fout bij opbouwen uitgaand SOAP-bericht", e);
+            return createEmptyResponse();
+        }
+    }
+
     // ── Response factory-methoden ─────────────────────────────────────────
 
     /** Construeert een ebMS2-conforme SOAP ACK-response. */

@@ -66,6 +66,13 @@ public class EbmsMessageProvider implements Provider<SOAPMessage> {
                 return pingEchoService.handlePing(header);
             }
 
+            // ebMS2 Acknowledgment (inkomende ACK op een rm-bericht dat wij stuurden)
+            if (soapHelper.isAcknowledgment(soapHeader)) {
+                String refToMessageId = soapHelper.parseRefToMessageId(soapHeader);
+                log.info("[ACK] ontvangen: refToMessageId={} van OIN={}", refToMessageId, clientOin);
+                return orchestratorService.handleAcknowledgment(refToMessageId);
+            }
+
             // Reguliere ebMS2-berichtverwerking
             String rawSoap = soapHelper.soapToString(request);
             return orchestratorService.processInboundMessage(request, header, rawSoap, clientOin);

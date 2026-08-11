@@ -4,8 +4,10 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import nl.logius.ebms.cpa.entity.CpaEntity;
 import nl.logius.ebms.cpa.entity.CpaPartyEntity;
+import nl.logius.ebms.cpa.entity.CpaDeliveryChannelEntity;
 import nl.logius.ebms.cpa.entity.PartnerCertificateEntity;
 import nl.logius.ebms.cpa.mapper.CpaMapper;
+import nl.logius.ebms.cpa.repository.CpaDeliveryChannelRepository;
 import nl.logius.ebms.cpa.repository.CpaPartyRepository;
 import nl.logius.ebms.cpa.repository.CpaRepository;
 import nl.logius.ebms.cpa.repository.PartnerCertificateRepository;
@@ -35,6 +37,7 @@ public class CpaService {
 
     private final CpaRepository              cpaRepository;
     private final CpaPartyRepository         partyRepository;
+    private final CpaDeliveryChannelRepository channelRepository;
     private final PartnerCertificateRepository certRepository;
     private final CpaMapper                  cpaMapper;
 
@@ -71,6 +74,50 @@ public class CpaService {
     @Transactional(readOnly = true)
     public List<PartnerCertificateEntity> findValidCertificates(String cpaId, String partyId) {
         return certRepository.findByCpaIdAndPartyIdAndValidUntilAfter(cpaId, partyId, Instant.now());
+    }
+
+    /**
+     * Haalt het afleverkanaal op voor een specifieke CPA-partij (gebruikt door de orchestrator
+     * om het endpoint-URL en DK-profiel voor uitgaande berichten te bepalen).
+     */
+    @Cacheable(value = "channel-by-party", key = "#cpaId + ':' + #partyId")
+    @Transactional(readOnly = true)
+    public DeliveryChannelDto findDeliveryChannel(String cpaId, String partyId) {
+        CpaDeliveryChannelEntity entity = channelRepository
+            .findFirstByCpaIdAndPartyId(cpaId, partyId)
+            .orElseThrow(() -> new EbmsException("CHANNEL_NOT_FOUND",
+                "Geen afleverkanaal gevonden voor CPA=" + cpaId + " partyId=" + partyId));
+        return cpaMapper.toChannelDto(entity);
+    }
+
+    /**
+     * Alle afleverkanalen voor een CPA.
+     */
+    @Transactional(readOnly = true)
+    public List<DeliveryChannelDto> findDeliveryChannels(String cpaId) {
+        return cpaMapper.toChannelDtoList(channelRepository.findByCpaId(cpaId));
+    }
+
+    /**
+     * Voegt een nieuw afleverkanaal toe aan een CPA.
+     */
+    @Transactional
+    public DeliveryChannelDto addDeliveryChannel(String cpaId, DeliveryChannelDto dto) {
+        if (!cpaRepository.existsByCpaId(cpaId)) {
+            throw new CpaNotFoundException(cpaId);
+        }
+        CpaDeliveryChannelEntity entity = CpaDeliveryChannelEntity.builder()
+            .cpaId(cpaId)
+            .partyId(dto.getPartyId())
+            .channelId(dto.getChannelId())
+            .dkProfile(dto.getDkProfile())
+            .transportProtocol(dto.getTransportProtocol() != null ? dto.getTransportProtocol() : "HTTP")
+            .endpointUrl(dto.getEndpointUrl())
+            .retryCount(dto.getRetryCount())
+            .retryInterval(dto.getRetryInterval())
+            .persistDuration(dto.getPersistDuration())
+            .build();
+        return cpaMapper.toChannelDto(channelRepository.save(entity));
     }
 
     // ── Schrijf-operaties ─────────────────────────────────────────────────

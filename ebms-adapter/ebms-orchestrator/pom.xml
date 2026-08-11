@@ -88,6 +88,16 @@
             <scope>runtime</scope>
         </dependency>
 
+        <!-- Spring Cache (Caffeine) voor CPA-lookups en kanaal-caching -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-cache</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.github.ben-manes.caffeine</groupId>
+            <artifactId>caffeine</artifactId>
+        </dependency>
+
         <!-- ── Testcontainers (integratietests) ─────────────────────────── -->
         <dependency>
             <groupId>org.testcontainers</groupId>

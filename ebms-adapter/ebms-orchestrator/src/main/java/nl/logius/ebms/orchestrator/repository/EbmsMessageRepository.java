@@ -20,6 +20,9 @@ public interface EbmsMessageRepository extends JpaRepository<EbmsMessageEntity, 
 
     Optional<EbmsMessageEntity> findByMessageId(String messageId);
 
+    /** Zoek het originele bericht op status, gebruikt voor ACK-afhandeling. */
+    Optional<EbmsMessageEntity> findByMessageIdAndStatus(String messageId, MessageStatus status);
+
     List<EbmsMessageEntity> findByConversationId(String conversationId);
 
     List<EbmsMessageEntity> findByStatus(MessageStatus status);
@@ -40,7 +43,7 @@ public interface EbmsMessageRepository extends JpaRepository<EbmsMessageEntity, 
         SELECT m FROM EbmsMessageEntity m
         WHERE m.timeToLive IS NOT NULL
           AND m.timeToLive < :now
-          AND m.status NOT IN ('DELIVERED', 'ACKNOWLEDGED', 'DUPLICATE')
+          AND m.status NOT IN ('DELIVERED', 'ACKNOWLEDGED', 'FAILED', 'DUPLICATE')
         """)
     List<EbmsMessageEntity> findExpiredMessages(@Param("now") Instant now);
 }

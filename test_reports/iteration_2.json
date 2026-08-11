@@ -1,0 +1,79 @@
+{
+  "summary": "Statische code-review van Fase 4 features: CryptoServiceClient, OutboundSoapClient, OutboundMessageService, OrchestratorService.handleAcknowledgment(), EbmsMessageProvider ACK-detectie, MessageStatus.SENT, CpaDeliveryChannel entiteit/repository/service/controller en de 4 nieuwe crypto-DTO's. Geen Java/Maven/Docker runtime beschikbaar – puur statische analyse.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "CryptoServiceClient.java – regel 137",
+        "issue": "COMPILATIEFOUT: variabele-type is gedeclareerd als `ResponseEntity<nl.logius.ebms.crypto.dto.EncryptResponse>` (fout package, klasse bestaat niet). De `.toEntity(EncryptResponse.class)` call op dezelfde regel gebruikt wél de correct geïmporteerde `nl.logius.ebms.common.model.crypto.EncryptResponse`. Dit genereert een 'cannot find symbol' compilatiefout. Fix: vervang het volledig gekwalificeerde type door het geïmporteerde type: `ResponseEntity<EncryptResponse> response = ...`.",
+        "priority": "CRITICAL"
+      },
+      {
+        "endpoint": "EbmsOrchestratorApplication.java",
+        "issue": "@EnableCaching ontbreekt. OutboundMessageService.getOutboundChannel() is geannoteerd met @Cacheable(\"outbound-channel\") maar Spring Boot activeert geen CacheManager zonder @EnableCaching of spring-boot-starter-cache in de pom.xml. Gevolg: cache werkt niet, elke berichten-verwerking veroorzaakt een extra HTTP-call naar de cpa-service. Fix: voeg @EnableCaching toe aan EbmsOrchestratorApplication of voeg spring-boot-starter-cache toe als dependency.",
+        "priority": "HIGH"
+      },
+      {
+        "endpoint": "RabbitMqConfig.java / OutboundMessageService.java",
+        "issue": "Manual Acknowledgment mode niet geconfigureerd. OutboundMessageService roept channel.basicAck() en channel.basicNack() aan, maar RabbitMqConfig mist een SimpleRabbitListenerContainerFactory-bean met acknowledgeMode = AcknowledgeMode.MANUAL. Zonder dit valt Spring AMQP terug op AUTO-ack: berichten worden auto-acked na return van de listener-methode. De nack(requeue=true) aanroepen bij EbmsException zullen dan niet werken, waardoor de retry-logica niet functioneert. Fix: voeg een @Bean SimpleRabbitListenerContainerFactory toe met setAcknowledgeMode(AcknowledgeMode.MANUAL) in RabbitMqConfig.",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": [
+      {
+        "endpoint": "CpaDeliveryChannelEntity.java – retry_count",
+        "issue": "De SQL-kolom retry_count is SMALLINT maar de Java-entiteit declareert `Integer retryCount`. Hibernate mapt SMALLINT op Short; Integer werkt ook (Hibernate converteert impliciet) maar kan theoretisch tot onverwacht gedrag leiden bij JPQL-queries met type-vergelijkingen. Aanbeveling: verander naar `Short retryCount` of pas de SQL aan naar INTEGER.",
+        "priority": "LOW"
+      },
+      {
+        "endpoint": "OutboundMessageService.java – getOutboundChannel()",
+        "issue": "@Cacheable is gedeclareerd op een public methode in dezelfde klasse als de @RabbitListener methode. Spring AOP-caching werkt via proxy; self-invocation (aanroep van handleOutboundMessage -> getOutboundChannel binnen dezelfde bean) wordt NIET door de proxy onderschept. De cache heeft daardoor geen effect. Fix: verplaats getOutboundChannel() naar een aparte @Service klasse (bijv. CpaChannelCacheService).",
+        "priority": "HIGH"
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "CRITICAL: Fix CryptoServiceClient.java regel 137 – verander `nl.logius.ebms.crypto.dto.EncryptResponse` naar `EncryptResponse` (gebruik de reeds geïmporteerde klasse nl.logius.ebms.common.model.crypto.EncryptResponse).",
+    "HIGH: Voeg @EnableCaching toe aan EbmsOrchestratorApplication.java én voeg spring-boot-starter-cache toe aan ebms-orchestrator/pom.xml (anders geen CacheManager beschikbaar).",
+    "HIGH: Configureer manual ack in RabbitMqConfig: voeg SimpleRabbitListenerContainerFactory @Bean toe met setAcknowledgeMode(AcknowledgeMode.MANUAL) zodat de retry/nack-logica in OutboundMessageService correct werkt.",
+    "HIGH: Verplaats getOutboundChannel() uit OutboundMessageService naar een aparte Spring-bean om de Spring AOP self-invocation proxy-bypass te vermijden (anders werkt @Cacheable niet bij aanroep vanuit dezelfde bean).",
+    "LOW: Overweeg retry_count kolom te wijzigen naar INTEGER of de Java entiteit naar Short om type-mismatch te voorkomen."
+  ],
+  "critical_code_review_comments": [
+    "CryptoServiceClient: imports voor sign/verify/decrypt zijn correct (nl.logius.ebms.common.model.crypto.*). ALLEEN encrypt() heeft het wrong fully-qualified type `nl.logius.ebms.crypto.dto.EncryptResponse` voor de variabele-declaratie (regel 137) – compilatiefout.",
+    "OutboundSoapClient: CXF-imports zijn correct (org.apache.cxf.endpoint.Client, org.apache.cxf.frontend.ClientProxy, org.apache.cxf.transport.http.HTTPConduit, org.apache.cxf.transports.http.configuration.HTTPClientPolicy, org.apache.cxf.configuration.jsse.TLSClientParameters). pom.xml heeft cxf-spring-boot-starter-jaxws v4.0.4 – CXF staat correct op het classpath.",
+    "OrchestratorService.handleAcknowledgment(): correct geïmplementeerd. findByMessageIdAndStatus() bestaat in EbmsMessageRepository. SENT->DELIVERED status-machine is correct. Audit-event publicatie aanwezig.",
+    "EbmsMessageProvider.invoke(): ACK-detectie via soapHelper.isAcknowledgment() vóór normale berichtverwerking – correct geïmplementeerd. RefToMessageId wordt correct geparsed en doorgegeven aan handleAcknowledgment().",
+    "MessageStatus.SENT: aanwezig in de enum. V2__add_sent_status.sql voegt SENT toe via ALTER TYPE ... ADD VALUE IF NOT EXISTS – correct idempotent Flyway-script.",
+    "CpaDeliveryChannelEntity: tabel-mapping en unieke constraint (uq_channel) stemmen volledig overeen met V1__init_cpa.sql.",
+    "CpaService: findDeliveryChannel() en findDeliveryChannels() correct geïmplementeerd. addDeliveryChannel() checkt CPA-bestaan via existsByCpaId(). CpaController-endpoints GET/POST /api/cpa/{cpaId}/channels en GET /api/cpa/{cpaId}/channels/{partyId} correct gedeclareerd.",
+    "4 crypto-DTO's (SignResponse, VerifyResponse, EncryptResponse, DecryptResponse) in ebms-common zijn correct: juiste veldnamen (signedXml, valid, encryptedXml, decryptedXml), Lombok-annotaties aanwezig, Jackson @JsonInclude(NON_NULL) aanwezig.",
+    "@EnableScheduling aanwezig in EbmsOrchestratorApplication – schedulers werken correct.",
+    "@EnableCaching ONTBREEKT in EbmsOrchestratorApplication – zie action items."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "N/A (geen runtime – statische code-review only)",
+    "frontend": "N/A (geen frontend)"
+  },
+  "seed_data_creation": "",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Fase 4 code-review compleet. 3 kritieke bevindingen: (1) compilatiefout in CryptoServiceClient.encrypt() door fout package-pad, (2) @EnableCaching ontbreekt waardoor @Cacheable geen effect heeft, (3) RabbitMQ manual ack mode niet geconfigureerd in RabbitMqConfig. Na fixen van deze punten kan een integratietest via Testcontainers worden opgezet (Docker vereist). Vorige iteratie (Fase 3): @MockBean deprecation en Testcontainers BOM-volgorde waren de enige openstaande minor issues.",
+  "rca_of_issues": {
+    "compilation_error_encrypt": {
+      "root_cause": "In CryptoServiceClient.encrypt() werd per ongeluk een volledig gekwalificeerd klassenaam uit een niet-bestaand package (nl.logius.ebms.crypto.dto.EncryptResponse) gebruikt voor de variabele-declaratie. De import bovenaan de klasse gebruikt het correcte package (nl.logius.ebms.common.model.crypto.EncryptResponse). Hoogstwaarschijnlijk een copy-paste fout of een IDE-autofill die naar een oud (verwijderd) package verwees.",
+      "reproduction": "mvn compile op ebms-orchestrator module – compiler error 'cannot find symbol: nl.logius.ebms.crypto.dto.EncryptResponse'.",
+      "mitigation": "Vervang regel 137: `ResponseEntity<nl.logius.ebms.crypto.dto.EncryptResponse>` door `ResponseEntity<EncryptResponse>`."
+    },
+    "cacheable_self_invocation": {
+      "root_cause": "Spring AOP-proxies onderscheppen alleen externe aanroepen naar een bean. Aanroepen van handleOutboundMessage() naar getOutboundChannel() binnen dezelfde OutboundMessageService bean gaan direct (niet via proxy), waardoor @Cacheable niet wordt geactiveerd.",
+      "mitigation": "Extraheer getOutboundChannel() naar een aparte @Service klasse, bijv. CpaChannelCacheService, en injecteer die in OutboundMessageService."
+    }
+  }
+}

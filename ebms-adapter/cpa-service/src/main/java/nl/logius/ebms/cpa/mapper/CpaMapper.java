@@ -1,8 +1,10 @@
 package nl.logius.ebms.cpa.mapper;
 
+import nl.logius.ebms.cpa.entity.CpaDeliveryChannelEntity;
 import nl.logius.ebms.cpa.entity.CpaEntity;
 import nl.logius.ebms.cpa.entity.CpaPartyEntity;
 import nl.logius.ebms.common.model.cpa.CpaDto;
+import nl.logius.ebms.common.model.cpa.DeliveryChannelDto;
 import nl.logius.ebms.common.model.cpa.PartyInfoDto;
 import org.mapstruct.*;
 
@@ -37,4 +39,11 @@ public interface CpaMapper {
 
     @Mapping(target = "id", expression = "java(e.getId() != null ? e.getId().toString() : null)")
     PartyInfoDto toPartyDto(CpaPartyEntity e);
+
+    // ── CpaDeliveryChannelEntity → DeliveryChannelDto ─────────────────────
+
+    @Mapping(target = "id", expression = "java(e.getId() != null ? e.getId().toString() : null)")
+    DeliveryChannelDto toChannelDto(CpaDeliveryChannelEntity e);
+
+    List<DeliveryChannelDto> toChannelDtoList(List<CpaDeliveryChannelEntity> entities);
 }
