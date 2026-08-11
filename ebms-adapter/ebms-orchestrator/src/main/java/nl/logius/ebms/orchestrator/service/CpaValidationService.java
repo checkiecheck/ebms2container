@@ -1,0 +1,99 @@
+package nl.logius.ebms.orchestrator.service;
+
+import lombok.extern.slf4j.Slf4j;
+import nl.logius.ebms.common.model.cpa.CpaDto;
+import nl.logius.ebms.common.model.cpa.PartyInfoDto;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.stereotype.Service;
+import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.RestClient;
+
+import java.util.List;
+
+/**
+ * Valideert een binnenkomend ebMS2-bericht tegen de CPA-registry en de OIN-autorisatie.
+ *
+ * <p>Stappen:
+ * <ol>
+ *   <li>Verifieer dat de CPA bestaat en de status {@code ACTIVE} heeft</li>
+ *   <li>Verifieer dat het OIN (uit mTLS-header) geautoriseerd is voor de CPA</li>
+ * </ol>
+ *
+ * <p>Bij onbereikbaarheid van de cpa-service wordt een
+ * {@link CpaValidationResult#serviceUnavailable(String)} teruggegeven; de orchestrator
+ * bepaalt zelf of dit een fail-open of fail-closed scenario is.
+ */
+@Service
+@Slf4j
+public class CpaValidationService {
+
+    private final RestClient cpaRestClient;
+
+    public CpaValidationService(@Qualifier("cpaRestClient") RestClient cpaRestClient) {
+        this.cpaRestClient = cpaRestClient;
+    }
+
+    /**
+     * Valideert CPA-ID en optioneel OIN voor een binnenkomend bericht.
+     *
+     * @param cpaId     de CPA-identifier uit de ebXML MessageHeader
+     * @param clientOin het OIN uit de X-Forwarded-Client-OIN mTLS-header (mag null zijn)
+     * @return {@link CpaValidationResult} met validatiestatus
+     */
+    public CpaValidationResult validateCpaAndOin(String cpaId, String clientOin) {
+
+        // ── Stap 1: CPA ophalen en statuscheck ────────────────────────────
+        CpaDto cpa;
+        try {
+            cpa = cpaRestClient.get()
+                .uri("/api/cpa/{cpaId}", cpaId)
+                .retrieve()
+                .body(CpaDto.class);
+
+            if (cpa == null) {
+                log.warn("[CPA-VALIDATION] Lege respons voor cpaId={}", cpaId);
+                return CpaValidationResult.failure("CPA niet gevonden: " + cpaId);
+            }
+            if (!"ACTIVE".equalsIgnoreCase(cpa.getStatus())) {
+                log.warn("[CPA-VALIDATION] CPA niet actief: {} status={}", cpaId, cpa.getStatus());
+                return CpaValidationResult.failure(
+                    "CPA is niet actief (status=" + cpa.getStatus() + "): " + cpaId);
+            }
+            log.debug("[CPA-VALIDATION] CPA gevonden en actief: {}", cpaId);
+
+        } catch (HttpClientErrorException.NotFound e) {
+            log.warn("[CPA-VALIDATION] CPA niet gevonden: {}", cpaId);
+            return CpaValidationResult.failure("CPA niet gevonden: " + cpaId);
+        } catch (Exception e) {
+            log.warn("[CPA-VALIDATION] cpa-service onbereikbaar ({}): {}", cpaId, e.getMessage());
+            return CpaValidationResult.serviceUnavailable(e.getMessage());
+        }
+
+        // ── Stap 2: OIN-autorisatiecheck ──────────────────────────────────
+        if (clientOin != null && !clientOin.isBlank()) {
+            try {
+                List<PartyInfoDto> parties = cpaRestClient.get()
+                    .uri("/api/cpa/parties/oin/{oin}", clientOin)
+                    .retrieve()
+                    .body(new ParameterizedTypeReference<>() {});
+
+                boolean oinMatchesCpa = parties != null && parties.stream()
+                    .anyMatch(p -> cpaId.equals(p.getCpaId()));
+
+                if (!oinMatchesCpa) {
+                    log.warn("[CPA-VALIDATION] OIN {} niet geautoriseerd voor CPA {}", clientOin, cpaId);
+                    return CpaValidationResult.failure(
+                        "OIN " + clientOin + " is niet geautoriseerd voor CPA: " + cpaId);
+                }
+                log.debug("[CPA-VALIDATION] OIN {} geautoriseerd voor CPA {}", clientOin, cpaId);
+
+            } catch (Exception e) {
+                // Fail-open voor OIN: log maar blokkeer niet (vermijd lock-out bij cpa-serviceprobleem)
+                log.warn("[CPA-VALIDATION] OIN-lookup gefaald voor {} (fail-open): {}", clientOin, e.getMessage());
+            }
+        }
+
+        return CpaValidationResult.success(cpa);
+    }
+}
