@@ -1,0 +1,71 @@
+{
+  "summary": "Statische code-review iteratie 3 – nieuwe wijzigingen: inbound decryptie/verificatie in OrchestratorService, EbmsAckEvent publish in handleAcknowledgment, nieuw EbmsAckEvent.java, uitgebreide SoapHelper, Helm chart generatie. Alle vereiste checkpoints doorlopen.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "component": "OrchestratorService.java",
+        "issue": "Dubbele stapnummering in commentaar: stap 7 komt twee keer voor (regel 134 'Publiceer audit-event' én regel 149 'Construeer en retourneer SOAP ACK'). Misleidend voor onderhoud.",
+        "priority": "LOW"
+      },
+      {
+        "component": "SoapHelper.buildOutboundSoap()",
+        "issue": "AckRequested actor-attribuut gebruikt env.createName(\"actor\", \"\", \"\") met lege prefix en lege namespace. In SOAP 1.1 moet het actor-attribuut horen bij de SOAP-ENV namespace: env.createName(\"actor\", \"SOAP-ENV\", SOAP_ENV_NS). Inconsistent met de mustUnderstand-attributen elders in dezelfde methode.",
+        "priority": "MEDIUM"
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "checklist_results": {
+    "OrchestratorService_processInboundMessage": {
+      "(a) decryptie enkel als hasEncryptedBody() true": "PASS – regel 97: if (soapHelper.hasEncryptedBody(request))",
+      "(b) verify enkel als hasSignature() true": "PASS – regel 104: if (soapHelper.hasSignature(request))",
+      "(c) processedSoap bijgewerkt na decryptie, meegegeven aan verify en opgeslagen in entity": "PASS – regel 99 (decrypt return), 106 (verify met processedSoap), 118 (buildEntity met processedSoap)",
+      "(d) @Value import aanwezig": "PASS – regel 20: import org.springframework.beans.factory.annotation.Value;"
+    },
+    "OrchestratorService_handleAcknowledgment": {
+      "(a) EbmsAckEvent.builder() correct met messageId/conversationId/cpaId/acknowledgedAt": "PASS – regels 194-199; ackSenderPartyId niet gezet (geen waarde beschikbaar in context, acceptabel)",
+      "(b) ROUTING_ACK constant in RabbitMqConfig": "PASS – RabbitMqConfig.java regel 49: public static final String ROUTING_ACK = \"ack\";",
+      "(c) try/catch zodat mislukte publish transactie niet blokkeert": "PASS – regels 190-203 volledig omsloten door try/catch met warn-log"
+    },
+    "EbmsAckEvent_java": {
+      "(a) Lombok-annotaties @Getter @Setter @Builder @NoArgsConstructor @AllArgsConstructor": "PASS – regels 15-19",
+      "(b) velden messageId/conversationId/cpaId/ackSenderPartyId/acknowledgedAt": "PASS – alle velden aanwezig (regels 24-36)",
+      "(c) @Builder.Default op acknowledgedAt = Instant.now()": "PASS – regels 35-36",
+      "(d) @JsonInclude(NON_NULL)": "PASS – regel 20"
+    },
+    "SoapHelper_java": {
+      "hasSignature() zoekt op XML_DSIG_NS+Signature in header en body": "PASS – regels 71-84",
+      "hasEncryptedBody() zoekt op XML_ENC_NS+EncryptedData in body": "PASS – regels 90-98",
+      "XML_DSIG_NS correct (http://www.w3.org/2000/09/xmldsig#)": "PASS – regel 32",
+      "XML_ENC_NS correct (http://www.w3.org/2001/04/xmlenc#)": "PASS – regel 33",
+      "buildOutboundSoap() SOAP 1.1 envelope met volledige MessageHeader": "PASS – volledige implementatie aanwezig (From/To/PartyId/Service/Action/MessageInfo/AckRequested)",
+      "actor-attribuut in AckRequested correct namespace": "FAIL – env.createName(\"actor\", \"\", \"\") zou env.createName(\"actor\", \"SOAP-ENV\", SOAP_ENV_NS) moeten zijn"
+    },
+    "Helm_charts": {
+      "(a) Chart.yaml structuur (apiVersion/name/type/version)": "PASS – v2, ebms-adapter, application, 1.0.0",
+      "(b) ingress.yaml geen dubbele annotatiesleutels – Kong-annotaties uitsluitend via with .Values.ingress.annotations": "PASS – geen hardcoded annotaties meer",
+      "(c) KongPlugin resource binnen if .Values.ingress.enabled guard": "PASS – volledige file wrapped in guard (regels 1 en 55)",
+      "(d) values.yaml heeft konghq.com/plugins annotation": "PASS – regel 32: konghq.com/plugins: \"ebms-rate-limit\"",
+      "(e) configmap.yaml bevat EBMS_DECRYPTION_KEY_ALIAS": "PASS – regel 18"
+    }
+  },
+  "test_report_links": ["/app/test_reports/iteration_3.json"],
+  "action_items": [
+    "MEDIUM: Fix SoapHelper.buildOutboundSoap() – AckRequested actor-attribuut: vervang env.createName(\"actor\", \"\", \"\") door env.createName(\"actor\", \"SOAP-ENV\", SOAP_ENV_NS) voor correcte SOAP 1.1 namespace-conformiteit.",
+    "LOW: Herstel dubbele stapnummering in OrchestratorService.processInboundMessage() commentaar (twee stappen genummerd als '7.')."
+  ],
+  "critical_code_review_comments": [
+    "SoapHelper.buildOutboundSoap() regel ~199: actor-attribuut op AckRequested element heeft lege prefix/namespace. SOAP 1.1 spec vereist SOAP-ENV:actor. Kan bij strenge SOAP-validators afwijzen of verkeerd geïnterpreteerd worden.",
+    "EbmsAckEvent: ackSenderPartyId wordt niet ingevuld bij de publish in handleAcknowledgment. Overweeg of entity.getFromPartyId() (de partij die de ACK stuurde) hier gezet kan worden voor volledigheid van het event."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "95%", "frontend": "N/A"},
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Iteratie 3 statische review voltooid. Alle kritieke checkpoints geslaagd. Één medium-prioriteit bevinding: AckRequested actor-attribuut in SoapHelper.buildOutboundSoap() gebruikt lege namespace. Eerdere kritieke bugs uit iteratie 1-2 (caching, RabbitMQ manual ack, CryptoServiceClient import) zijn allemaal gefixed en blijven correct."
+}

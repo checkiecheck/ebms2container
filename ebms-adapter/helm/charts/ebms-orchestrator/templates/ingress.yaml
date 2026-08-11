@@ -1,0 +1,55 @@
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "ebms-orchestrator.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ebms-orchestrator.labels" . | nindent 4 }}
+  annotations:
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className | quote }}
+  {{- if .Values.ingress.tls }}
+  tls:
+    {{- range .Values.ingress.tls }}
+    - hosts:
+        {{- range .hosts }}
+        - {{ . | quote }}
+        {{- end }}
+      secretName: {{ .secretName }}
+    {{- end }}
+  {{- end }}
+  rules:
+    {{- range .Values.ingress.hosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          {{- range .paths }}
+          - path: {{ .path }}
+            pathType: {{ .pathType }}
+            backend:
+              service:
+                name: {{ include "ebms-orchestrator.fullname" $ }}
+                port:
+                  name: http
+          {{- end }}
+    {{- end }}
+
+---
+# ── KongPlugin: rate-limiting voor het SOAP-endpoint ────────────────────────
+apiVersion: configuration.konghq.com/v1
+kind: KongPlugin
+metadata:
+  name: ebms-rate-limit
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ebms-orchestrator.labels" . | nindent 4 }}
+plugin: rate-limiting
+config:
+  # Max 100 berichten per minuut per IP (configureer per CPA-profiel in productie)
+  minute: 100
+  policy: local
+{{- end }}

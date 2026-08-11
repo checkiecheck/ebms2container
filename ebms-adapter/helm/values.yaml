@@ -1,0 +1,195 @@
+# =============================================================================
+# Digikoppeling ebMS2 Adapter – Globale Helm values
+# Overschrijf per omgeving via: helm upgrade -f values-prod.yaml
+# =============================================================================
+
+# ── Globale instellingen ──────────────────────────────────────────────────────
+global:
+  imageRegistry: ""          # bijv. "registry.example.com/"
+  imagePullSecrets: []
+  storageClass: ""
+
+# ── ebms-orchestrator ─────────────────────────────────────────────────────────
+ebms-orchestrator:
+  enabled: true
+  replicaCount: 2
+
+  image:
+    repository: ebms-orchestrator
+    tag: "latest"
+    pullPolicy: IfNotPresent
+
+  service:
+    port: 8080
+
+  ingress:
+    enabled: true
+    className: "kong"
+    annotations:
+      konghq.com/protocols: "https"
+      konghq.com/strip-path: "false"
+      konghq.com/preserve-host: "true"
+      konghq.com/plugins: "ebms-rate-limit"
+    hosts:
+      - host: ebms.example.com
+        paths:
+          - path: /soap/ebms
+            pathType: Prefix
+    tls:
+      - secretName: ebms-tls-cert
+        hosts:
+          - ebms.example.com
+
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "512Mi"
+    limits:
+      cpu: "1000m"
+      memory: "1Gi"
+
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 70
+
+  env:
+    CPA_SERVICE_URL: "http://cpa-service:8081"
+    CRYPTO_SERVICE_URL: "http://crypto-service:8082"
+    SPRING_RABBITMQ_VIRTUAL_HOST: "ebms"
+    EBMS_SIGNING_KEY_ALIAS: "signing-key"
+    EBMS_DECRYPTION_KEY_ALIAS: "encryption-key"
+    EBMS_CONNECT_TIMEOUT_MS: "10000"
+    EBMS_READ_TIMEOUT_MS: "30000"
+
+  secret:
+    SPRING_DATASOURCE_PASSWORD: "change-me-orchestrator"
+    SPRING_RABBITMQ_PASSWORD: "change-me-amqp"
+
+# ── cpa-service ───────────────────────────────────────────────────────────────
+cpa-service:
+  enabled: true
+  replicaCount: 2
+
+  image:
+    repository: cpa-service
+    tag: "latest"
+    pullPolicy: IfNotPresent
+
+  service:
+    port: 8081
+
+  ingress:
+    enabled: false   # intern verkeer via ClusterIP
+
+  resources:
+    requests:
+      cpu: "125m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 4
+    targetCPUUtilizationPercentage: 70
+
+  env: {}
+
+  secret:
+    SPRING_DATASOURCE_PASSWORD: "change-me-cpa"
+
+# ── crypto-service ────────────────────────────────────────────────────────────
+crypto-service:
+  enabled: true
+  replicaCount: 2
+
+  image:
+    repository: crypto-service
+    tag: "latest"
+    pullPolicy: IfNotPresent
+
+  service:
+    port: 8082
+
+  ingress:
+    enabled: false   # intern verkeer via ClusterIP – NOOIT extern bereikbaar
+
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "512Mi"
+    limits:
+      cpu: "1000m"
+      memory: "1Gi"
+
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 4
+    targetCPUUtilizationPercentage: 70
+
+  env:
+    KEYSTORE_PATH: "/app/keystores/keystore.p12"
+
+  secret:
+    SPRING_DATASOURCE_PASSWORD: "change-me-crypto"
+    KEYSTORE_PASSWORD: "change-me-keystore"
+
+  # PVC voor de PKIoverheid keystore
+  persistence:
+    enabled: true
+    storageClass: ""
+    size: "1Gi"
+    mountPath: "/app/keystores"
+
+# ── PostgreSQL (bitnami/postgresql) ──────────────────────────────────────────
+postgresql:
+  enabled: true
+  auth:
+    postgresPassword: "change-me-postgres"
+    username: "ebms"
+    password: "change-me-ebms"
+    database: "ebms_orchestrator"   # default database; extra DB's via initdb-script
+
+  primary:
+    initdb:
+      scriptsConfigMap: "ebms-postgresql-initdb"
+
+  persistence:
+    enabled: true
+    size: "20Gi"
+
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "256Mi"
+    limits:
+      cpu: "1000m"
+      memory: "1Gi"
+
+# ── RabbitMQ (bitnami/rabbitmq) ───────────────────────────────────────────────
+rabbitmq:
+  enabled: true
+  auth:
+    username: "ebms_amqp"
+    password: "change-me-amqp"
+    erlangCookie: "change-me-cookie"
+
+  extraConfiguration: |-
+    default_vhost = ebms
+
+  persistence:
+    enabled: true
+    size: "8Gi"
+
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"

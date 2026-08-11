@@ -29,6 +29,9 @@ public class SoapHelper {
     public static final String EBXML_PING_SERVICE =
         "urn:oasis:names:tc:ebxml-msg:service";
 
+    private static final String XML_DSIG_NS = "http://www.w3.org/2000/09/xmldsig#";
+    private static final String XML_ENC_NS  = "http://www.w3.org/2001/04/xmlenc#";
+
     // ── MessageHeader parser ───────────────────────────────────────────────
 
     /**
@@ -57,6 +60,41 @@ public class SoapHelper {
             .messageInfo(parseMessageInfo(mh))
             .ackRequested(parseAckRequested(soapHeader))
             .build();
+    }
+
+    // ── Crypto detectie (inbound) ─────────────────────────────────────────────
+
+    /**
+     * Detecteert of het SOAP-bericht een XML-DSig {@code ds:Signature} element bevat.
+     * Gebruikt door {@code OrchestratorService} om te bepalen of handtekeningverificatie vereist is.
+     */
+    public boolean hasSignature(SOAPMessage message) {
+        try {
+            SOAPHeader header = message.getSOAPHeader();
+            if (header != null &&
+                header.getElementsByTagNameNS(XML_DSIG_NS, "Signature").getLength() > 0) {
+                return true;
+            }
+            SOAPBody body = message.getSOAPBody();
+            return body != null &&
+                body.getElementsByTagNameNS(XML_DSIG_NS, "Signature").getLength() > 0;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
+     * Detecteert of de SOAP-body versleuteld is (XML-Enc {@code xenc:EncryptedData}).
+     * Gebruikt door {@code OrchestratorService} om te bepalen of ontsleuteling vereist is.
+     */
+    public boolean hasEncryptedBody(SOAPMessage message) {
+        try {
+            SOAPBody body = message.getSOAPBody();
+            return body != null &&
+                body.getElementsByTagNameNS(XML_ENC_NS, "EncryptedData").getLength() > 0;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     // ── ACK-detectie ──────────────────────────────────────────────────────────
@@ -158,7 +196,8 @@ public class SoapHelper {
                 ackReq.addAttribute(env.createName("mustUnderstand", "SOAP-ENV", SOAP_ENV_NS), "1");
                 ackReq.addAttribute(env.createName("signed", "eb", EBXML_MSG_NS), "false");
                 ackReq.addAttribute(
-                    env.createName("actor", "", ""), "urn:oasis:names:tc:ebxml-msg:actor:nextMSH");
+                    env.createName("actor", "SOAP-ENV", SOAP_ENV_NS),
+                    "urn:oasis:names:tc:ebxml-msg:actor:nextMSH");
             }
 
             msg.saveChanges();

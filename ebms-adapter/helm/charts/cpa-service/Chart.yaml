@@ -1,0 +1,6 @@
+apiVersion: v2
+name: cpa-service
+description: Digikoppeling ebMS2 CPA-register service – REST API voor Collaboration Protocol Agreements
+type: application
+version: 1.0.0
+appVersion: "1.0.0"

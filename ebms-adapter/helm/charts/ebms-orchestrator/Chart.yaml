@@ -1,0 +1,6 @@
+apiVersion: v2
+name: ebms-orchestrator
+description: Digikoppeling ebMS2 Orchestrator – SOAP endpoint + Reliable Messaging + AMQP pipeline
+type: application
+version: 1.0.0
+appVersion: "1.0.0"

@@ -163,9 +163,41 @@ Bouwen van een moderne ebMS2 adapter conform:
 - [x] `V2__add_sent_status.sql` – PostgreSQL ENUM uitgebreid met `SENT`
 - [x] `MessageStatus.SENT` toegevoegd aan Java enum
 
+### Fase 5 – E2E Inbound Pipeline + ACK Notificatie + Helm (voltooid – februari 2026)
+
+#### ebms-orchestrator – Inbound crypto pipeline
+- [x] `OrchestratorService.processInboundMessage()` uitgebreid:
+  - Stap 2: Inbound XML-Enc decryptie via `CryptoServiceClient.decrypt()` (enkel bij versleuteld bericht)
+  - Stap 3: Inbound XML-DSig verificatie via `CryptoServiceClient.verify()` (enkel bij ondertekend bericht)
+  - `processedSoap` string consistent doorgegeven aan verify, entity opslag en AMQP-publish
+  - `@Value("${ebms.inbound.decryption-key-alias:encryption-key}")` voor configureerbaar decryptie-alias
+- [x] `OrchestratorService.handleAcknowledgment()` uitgebreid:
+  - Publiceert `EbmsAckEvent` op `ebms.ack.events` queue na SENT→DELIVERED status-update
+  - `ackSenderPartyId` gevuld met `entity.getToPartyId()` (de partij die de ACK stuurde)
+  - Try/catch zodat mislukte AMQP-publish de transactie niet blokkeert
+- [x] `SoapHelper.java` uitgebreid:
+  - `hasSignature()` – detecteert XML-DSig `ds:Signature` in header én body
+  - `hasEncryptedBody()` – detecteert XML-Enc `xenc:EncryptedData` in body
+  - `isAcknowledgment()` – detecteert ebMS2 `Acknowledgment` in SOAP-header
+  - `parseRefToMessageId()` – parseert `RefToMessageId` uit inkomende ACK
+  - `buildOutboundSoap()` – construeert volledige SOAP 1.1 envelop met ebXML MessageHeader
+  - `SOAP-ENV:actor` namespace correct op `AckRequested` element (SOAP 1.1 conformant)
+
+#### ebms-common – Nieuw AMQP event
+- [x] `EbmsAckEvent.java` – backoffice notificatie-event voor definitieve bevestiging rm-berichten
+
+#### Helm umbrella chart (`/app/ebms-adapter/helm/`)
+- [x] `Chart.yaml` – umbrella chart met bitnami/postgresql en bitnami/rabbitmq dependencies
+- [x] `values.yaml` – globale values voor alle subcharts (Kong Ingress, resources, autoscaling, secrets)
+- [x] Subcharts: `ebms-orchestrator`, `cpa-service`, `crypto-service`
+  - Deployment, Service, ConfigMap, Secret, HPA, ServiceAccount templates
+  - `ebms-orchestrator` ingress: Kong Ingress Controller annotaties (protocols, strip-path, plugins)
+  - `KongPlugin` rate-limiting resource (100 req/min) binnen `ingress.enabled` guard
+  - `crypto-service`: PVC voor PKIoverheid keystore
+- [x] `postgresql-initdb-configmap.yaml` – aanmaken van 3 databases bij PostgreSQL initialisatie
+
 ---
 
-## Geprioriteerde Backlog
 
 ### P0 – Fase 4: auditor-service (NIEUW)
 - [ ] Aparte Spring Boot microservice op poort 8083 voor append-only audit-events

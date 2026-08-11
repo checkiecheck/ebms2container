@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "crypto-service.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "crypto-service.labels" . | nindent 4 }}
+  annotations:
+    # crypto-service is uitsluitend intern bereikbaar (Zero-Trust)
+    konghq.com/override: "internal-only"
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "crypto-service.selectorLabels" . | nindent 4 }}

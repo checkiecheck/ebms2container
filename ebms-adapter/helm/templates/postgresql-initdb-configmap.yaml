@@ -1,0 +1,47 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ebms-postgresql-initdb
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
+data:
+  01_create_databases.sql: |
+    -- ==========================================================================
+    -- ebMS2 Adapter – PostgreSQL initialisatie
+    -- Maakt drie gescheiden databases aan voor de drie microservices.
+    -- Elke service heeft eigen credentials conform Zero-Trust principe.
+    -- ==========================================================================
+
+    -- ebms-orchestrator database
+    CREATE DATABASE ebms_orchestrator
+        WITH OWNER = ebms
+             ENCODING = 'UTF8'
+             LC_COLLATE = 'en_US.utf8'
+             LC_CTYPE = 'en_US.utf8'
+             TEMPLATE = template0;
+    COMMENT ON DATABASE ebms_orchestrator IS 'Berichtopslag ebms-orchestrator';
+
+    -- cpa-service database
+    CREATE DATABASE ebms_cpa
+        WITH OWNER = ebms
+             ENCODING = 'UTF8'
+             LC_COLLATE = 'en_US.utf8'
+             LC_CTYPE = 'en_US.utf8'
+             TEMPLATE = template0;
+    COMMENT ON DATABASE ebms_cpa IS 'CPA-register cpa-service';
+
+    -- crypto-service database
+    CREATE DATABASE ebms_crypto
+        WITH OWNER = ebms
+             ENCODING = 'UTF8'
+             LC_COLLATE = 'en_US.utf8'
+             LC_CTYPE = 'en_US.utf8'
+             TEMPLATE = template0;
+    COMMENT ON DATABASE ebms_crypto IS 'Keystore metadata + audit log crypto-service';
+
+    -- Rechten
+    GRANT ALL PRIVILEGES ON DATABASE ebms_orchestrator TO ebms;
+    GRANT ALL PRIVILEGES ON DATABASE ebms_cpa TO ebms;
+    GRANT ALL PRIVILEGES ON DATABASE ebms_crypto TO ebms;

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: crypto-service
+description: Digikoppeling ebMS2 Crypto-service – XML-DSig + XML-Enc met PKIoverheid-sleutels (Zero-Trust)
+type: application
+version: 1.0.0
+appVersion: "1.0.0"

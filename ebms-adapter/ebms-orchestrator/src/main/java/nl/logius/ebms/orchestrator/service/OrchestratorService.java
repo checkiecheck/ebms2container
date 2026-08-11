@@ -17,6 +17,7 @@ import nl.logius.ebms.orchestrator.entity.MessageStatus;
 import nl.logius.ebms.orchestrator.repository.EbmsMessageRepository;
 import nl.logius.ebms.orchestrator.soap.SoapHelper;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -45,7 +46,11 @@ public class OrchestratorService {
     private final RabbitTemplate        rabbitTemplate;
     private final SoapHelper            soapHelper;
     private final CpaValidationService  cpaValidationService;
+    private final CryptoServiceClient   cryptoServiceClient;
     private final RetryProperties       retryProperties;
+
+    @Value("${ebms.inbound.decryption-key-alias:encryption-key}")
+    private String decryptionKeyAlias;
 
     // ── Inbound message processing ────────────────────────────────────────
 
@@ -87,23 +92,38 @@ public class OrchestratorService {
             throw new EbmsException("CPA_VALIDATION_FAILED", cpaResult.getErrorMessage());
         }
 
-        // 2. Duplicate suppression
+        // 2. Inbound decryptie (Digikoppeling osb-*-e profielen: decrypt dan verify)
+        String processedSoap = rawSoap;
+        if (soapHelper.hasEncryptedBody(request)) {
+            log.info("[INBOUND] Versleuteld bericht ontvangen – ontsleutelen: messageId={}", messageId);
+            processedSoap = cryptoServiceClient.decrypt(rawSoap, decryptionKeyAlias, messageId);
+            log.info("[INBOUND] Ontsleuteling geslaagd: messageId={}", messageId);
+        }
+
+        // 3. Inbound handtekeningverificatie (Digikoppeling osb-*-s profielen)
+        if (soapHelper.hasSignature(request)) {
+            log.info("[INBOUND] Ondertekend bericht – verificatie: messageId={}", messageId);
+            cryptoServiceClient.verify(processedSoap, messageId);
+            log.info("[INBOUND] Handtekening geverifieerd: messageId={}", messageId);
+        }
+
+        // 4. Duplicate suppression
         if (messageRepository.existsByMessageId(messageId)) {
             log.warn("[DUPLICATE] messageId={}", messageId);
             persistDuplicate(messageId, header);
             throw new DuplicateMessageException(messageId);
         }
 
-        // 3. Persisteer in database
-        EbmsMessageEntity entity = buildEntity(header, rawSoap, clientOin);
+        // 5. Persisteer in database
+        EbmsMessageEntity entity = buildEntity(header, processedSoap, clientOin);
         entity = messageRepository.save(entity);
 
-        // 4. Publiceer op AMQP inbound queue
+        // 6. Publiceer op AMQP inbound queue
         EbmsInboundMessage amqpMsg = EbmsInboundMessage.builder()
             .messageId(messageId)
             .conversationId(conversationId)
             .header(header)
-            .rawSoapXml(rawSoap)
+            .rawSoapXml(processedSoap)
             .receivedAt(Instant.now())
             .build();
         rabbitTemplate.convertAndSend(
@@ -111,7 +131,7 @@ public class OrchestratorService {
             RabbitMqConfig.ROUTING_INBOUND,
             amqpMsg);
 
-        // 5. Publiceer audit-event
+        // 7. Publiceer audit-event
         publishAudit(AuditEvent.builder()
             .eventType("MESSAGE_RECEIVED")
             .messageId(messageId)
@@ -122,11 +142,11 @@ public class OrchestratorService {
             .result("SUCCESS")
             .build());
 
-        // 6. Update status naar PROCESSING
+        // 8. Update status naar PROCESSING
         entity.setStatus(MessageStatus.PROCESSING);
         messageRepository.save(entity);
 
-        // 7. Construeer en retourneer SOAP ACK (alleen bij rm-profielen)
+        // 9. Construeer en retourneer SOAP ACK (alleen bij rm-profielen)
         boolean needsAck = header.getAckRequested() != null;
         if (needsAck) {
             return soapHelper.createAck(header);
@@ -157,6 +177,7 @@ public class OrchestratorService {
                 messageRepository.save(entity);
                 log.info("[ACK] Bericht {} bijgewerkt naar DELIVERED", refToMessageId);
 
+                // Audit-event
                 publishAudit(AuditEvent.builder()
                     .eventType("MESSAGE_ACKNOWLEDGED")
                     .messageId(refToMessageId)
@@ -164,6 +185,23 @@ public class OrchestratorService {
                     .cpaId(entity.getCpaId())
                     .result("SUCCESS")
                     .build());
+
+                // Backoffice ACK-notificatie (ebms.ack.events)
+                try {
+                    rabbitTemplate.convertAndSend(
+                        RabbitMqConfig.EXCHANGE_EBMS,
+                        RabbitMqConfig.ROUTING_ACK,
+                        nl.logius.ebms.common.model.amqp.EbmsAckEvent.builder()
+                            .messageId(refToMessageId)
+                            .conversationId(entity.getConversationId())
+                            .cpaId(entity.getCpaId())
+                            .ackSenderPartyId(entity.getToPartyId())
+                            .acknowledgedAt(java.time.Instant.now())
+                            .build());
+                    log.info("[ACK] Backoffice-notificatie gepubliceerd: messageId={}", refToMessageId);
+                } catch (Exception e) {
+                    log.warn("[ACK] Backoffice-notificatie mislukt: {}", e.getMessage());
+                }
             }, () -> {
                 // Kan al DELIVERED zijn (dubbele ACK) of nooit verzonden zijn – log alleen
                 log.warn("[ACK] Geen SENT-bericht gevonden voor refToMessageId={}", refToMessageId);

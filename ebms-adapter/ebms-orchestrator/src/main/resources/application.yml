@@ -80,6 +80,8 @@ ebms:
     signing-key-alias: ${EBMS_SIGNING_KEY_ALIAS:signing-key}
     connect-timeout-ms: ${EBMS_CONNECT_TIMEOUT_MS:10000}
     read-timeout-ms: ${EBMS_READ_TIMEOUT_MS:30000}
+  inbound:
+    decryption-key-alias: ${EBMS_DECRYPTION_KEY_ALIAS:encryption-key}
 
 # ── Actuator / health ─────────────────────────────────────────────────────────
 management:

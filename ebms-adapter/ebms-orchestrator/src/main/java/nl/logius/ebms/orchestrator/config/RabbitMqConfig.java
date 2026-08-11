@@ -35,8 +35,10 @@ public class RabbitMqConfig {
     public static final String QUEUE_INBOUND   = "ebms.inbound.messages";
     /** Uitgaande ebMS2-berichten / ACK's – wachten op verzending. */
     public static final String QUEUE_OUTBOUND  = "ebms.outbound.messages";
-    /** Audit-events – forwarden naar auditor-service (Fase 3). */
+    /** Audit-events – forwarden naar auditor-service. */
     public static final String QUEUE_AUDIT     = "ebms.audit.events";
+    /** ACK-events – notificatie aan backoffice dat een rm-bericht definitief DELIVERED is. */
+    public static final String QUEUE_ACK       = "ebms.ack.events";
     /** Dead Letter Queue voor berichten die definitief gefaald zijn. */
     public static final String QUEUE_DLQ       = "ebms.dlq";
 
@@ -44,6 +46,7 @@ public class RabbitMqConfig {
     public static final String ROUTING_INBOUND  = "inbound";
     public static final String ROUTING_OUTBOUND = "outbound";
     public static final String ROUTING_AUDIT    = "audit";
+    public static final String ROUTING_ACK      = "ack";
 
     // ── Exchange bean ─────────────────────────────────────────────────────────
 
@@ -79,6 +82,11 @@ public class RabbitMqConfig {
     }
 
     @Bean
+    public Queue ackQueue() {
+        return QueueBuilder.durable(QUEUE_ACK).build();
+    }
+
+    @Bean
     public Queue deadLetterQueue() {
         return QueueBuilder.durable(QUEUE_DLQ).build();
     }
@@ -98,6 +106,11 @@ public class RabbitMqConfig {
     @Bean
     public Binding auditBinding(Queue auditQueue, DirectExchange ebmsExchange) {
         return BindingBuilder.bind(auditQueue).to(ebmsExchange).with(ROUTING_AUDIT);
+    }
+
+    @Bean
+    public Binding ackBinding(Queue ackQueue, DirectExchange ebmsExchange) {
+        return BindingBuilder.bind(ackQueue).to(ebmsExchange).with(ROUTING_ACK);
     }
 
     // ── Listener Container Factory (manual ack) ───────────────────────────────
