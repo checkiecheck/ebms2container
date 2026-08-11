@@ -4,10 +4,13 @@ import jakarta.xml.soap.SOAPMessage;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import nl.logius.ebms.common.exception.DuplicateMessageException;
+import nl.logius.ebms.common.exception.EbmsException;
 import nl.logius.ebms.common.model.amqp.AuditEvent;
 import nl.logius.ebms.common.model.amqp.EbmsInboundMessage;
+import nl.logius.ebms.common.model.amqp.EbmsOutboundMessage;
 import nl.logius.ebms.common.model.ebxml.EbxmlMessageHeader;
 import nl.logius.ebms.orchestrator.config.RabbitMqConfig;
+import nl.logius.ebms.orchestrator.config.RetryProperties;
 import nl.logius.ebms.orchestrator.entity.EbmsMessageEntity;
 import nl.logius.ebms.orchestrator.entity.MessageDirection;
 import nl.logius.ebms.orchestrator.entity.MessageStatus;
@@ -41,6 +44,8 @@ public class OrchestratorService {
     private final EbmsMessageRepository messageRepository;
     private final RabbitTemplate        rabbitTemplate;
     private final SoapHelper            soapHelper;
+    private final CpaValidationService  cpaValidationService;
+    private final RetryProperties       retryProperties;
 
     // ── Inbound message processing ────────────────────────────────────────
 
@@ -67,18 +72,33 @@ public class OrchestratorService {
             header.getFrom().isEmpty() ? "?" : header.getFrom().get(0).getValue(),
             header.getAction());
 
-        // 1. Duplicate suppression
+        // 1. CPA-validatie via cpa-service (fail-closed)
+        CpaValidationResult cpaResult = cpaValidationService.validateCpaAndOin(cpaId, clientOin);
+        if (!cpaResult.isValid()) {
+            log.warn("[CPA-BLOCKED] messageId={} reden={}", messageId, cpaResult.getErrorMessage());
+            publishAudit(AuditEvent.builder()
+                .eventType("MESSAGE_REJECTED")
+                .messageId(messageId)
+                .cpaId(cpaId)
+                .partyId(clientOin)
+                .result("FAILURE")
+                .errorDetail(cpaResult.getErrorMessage())
+                .build());
+            throw new EbmsException("CPA_VALIDATION_FAILED", cpaResult.getErrorMessage());
+        }
+
+        // 2. Duplicate suppression
         if (messageRepository.existsByMessageId(messageId)) {
             log.warn("[DUPLICATE] messageId={}", messageId);
             persistDuplicate(messageId, header);
             throw new DuplicateMessageException(messageId);
         }
 
-        // 2. Persisteer in database
+        // 3. Persisteer in database
         EbmsMessageEntity entity = buildEntity(header, rawSoap, clientOin);
         entity = messageRepository.save(entity);
 
-        // 3. Publiceer op AMQP inbound queue
+        // 4. Publiceer op AMQP inbound queue
         EbmsInboundMessage amqpMsg = EbmsInboundMessage.builder()
             .messageId(messageId)
             .conversationId(conversationId)
@@ -91,7 +111,7 @@ public class OrchestratorService {
             RabbitMqConfig.ROUTING_INBOUND,
             amqpMsg);
 
-        // 4. Publiceer audit-event
+        // 5. Publiceer audit-event
         publishAudit(AuditEvent.builder()
             .eventType("MESSAGE_RECEIVED")
             .messageId(messageId)
@@ -102,11 +122,11 @@ public class OrchestratorService {
             .result("SUCCESS")
             .build());
 
-        // 5. Update status naar PROCESSING
+        // 6. Update status naar PROCESSING
         entity.setStatus(MessageStatus.PROCESSING);
         messageRepository.save(entity);
 
-        // 6. Construeer en retourneer SOAP ACK (alleen bij rm-profielen)
+        // 7. Construeer en retourneer SOAP ACK (alleen bij rm-profielen)
         boolean needsAck = header.getAckRequested() != null;
         if (needsAck) {
             return soapHelper.createAck(header);
@@ -128,6 +148,53 @@ public class OrchestratorService {
         if (!expired.isEmpty()) {
             messageRepository.saveAll(expired);
             log.info("{}  berichten als FAILED gemarkeerd (TTL verstreken)", expired.size());
+        }
+    }
+
+    /**
+     * Reliable Messaging retry-scheduler.
+     *
+     * <p>Herneemt het verzenden van FAILED berichten die nog retrypogingen over hebben.
+     * Interval: configureerbaar via {@code ebms.reliable-messaging.retry-check-interval-ms}.
+     */
+    @Scheduled(fixedDelayString = "${ebms.reliable-messaging.retry-check-interval-ms:300000}")
+    @Transactional
+    public void retryFailedMessages() {
+        Instant retryBefore = Instant.now()
+            .minusSeconds(retryProperties.getRetryIntervalSeconds());
+
+        List<EbmsMessageEntity> candidates = messageRepository.findMessagesForRetry(
+            retryProperties.getMaxRetries(), retryBefore);
+
+        if (candidates.isEmpty()) {
+            return;
+        }
+
+        log.info("[RETRY] {} kandidaat-bericht(en) gevonden voor herpoging", candidates.size());
+
+        for (EbmsMessageEntity msg : candidates) {
+            try {
+                msg.setRetryCount((short) (msg.getRetryCount() + 1));
+                msg.setLastRetryAt(Instant.now());
+                msg.setStatus(MessageStatus.PROCESSING);
+                messageRepository.save(msg);
+
+                EbmsOutboundMessage retryMsg = EbmsOutboundMessage.builder()
+                    .messageId(msg.getMessageId())
+                    .scheduledAt(Instant.now())
+                    .build();
+                rabbitTemplate.convertAndSend(
+                    RabbitMqConfig.EXCHANGE_EBMS,
+                    RabbitMqConfig.ROUTING_OUTBOUND,
+                    retryMsg);
+
+                log.info("[RETRY] Herpoging #{} gepubliceerd: messageId={}",
+                    msg.getRetryCount(), msg.getMessageId());
+
+            } catch (Exception e) {
+                log.error("[RETRY] Herpoging mislukt voor messageId={}: {}",
+                    msg.getMessageId(), e.getMessage());
+            }
         }
     }
 
@@ -158,7 +225,6 @@ public class OrchestratorService {
     }
 
     private void persistDuplicate(String messageId, EbxmlMessageHeader header) {
-        EbmsMessageEntity dup = messageRepository.findByMessageId(messageId).orElse(null);
         // Log alleen; origineel bericht blijft ongewijzigd
         publishAudit(AuditEvent.builder()
             .eventType("MESSAGE_DUPLICATE")

@@ -70,6 +70,7 @@ ebms:
   reliable-messaging:
     retry-interval-seconds: 60
     max-retries: 3
+    retry-check-interval-ms: 300000
     duplicate-window-hours: 24
 
 # ── Actuator / health ─────────────────────────────────────────────────────────

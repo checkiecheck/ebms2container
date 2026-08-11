@@ -8,6 +8,7 @@ import nl.logius.ebms.crypto.dto.*;
 import nl.logius.ebms.crypto.entity.KeyPairMetadataEntity;
 import nl.logius.ebms.crypto.repository.KeyPairMetadataRepository;
 import nl.logius.ebms.crypto.service.KeyStoreService;
+import nl.logius.ebms.crypto.service.XmlEncryptionService;
 import nl.logius.ebms.crypto.service.XmlSigningService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
@@ -37,6 +38,7 @@ import java.util.List;
 public class CryptoController {
 
     private final XmlSigningService         xmlSigningService;
+    private final XmlEncryptionService      xmlEncryptionService;
     private final KeyStoreService           keyStoreService;
     private final KeyPairMetadataRepository keyMetaRepository;
 
@@ -74,6 +76,43 @@ public class CryptoController {
             .valid(valid)
             .messageId(request.getMessageId())
             .errorDetail(valid ? null : "Handtekening is ongeldig of ontbreekt")
+            .build());
+    }
+
+    // ── XML-Enc Encryptie ─────────────────────────────────────────────────
+
+    /**
+     * Versleutelt een XML-document met AES-256-GCM (sessiesleutel verpakt met RSA-OAEP).
+     * Vereist voor Digikoppeling-profielen {@code osb-be-e} en {@code osb-rm-e}.
+     */
+    @PostMapping("/encrypt")
+    public ResponseEntity<EncryptResponse> encrypt(@Valid @RequestBody EncryptRequest request) {
+        String encryptedXml = xmlEncryptionService.encrypt(
+            request.getXmlContent(),
+            request.getRecipientKeyAlias(),
+            request.getMessageId());
+
+        return ResponseEntity.ok(EncryptResponse.builder()
+            .encryptedXml(encryptedXml)
+            .recipientKeyAlias(request.getRecipientKeyAlias())
+            .messageId(request.getMessageId())
+            .build());
+    }
+
+    /**
+     * Ontsleutelt een XML-document dat versleuteld is conform XML-Enc 1.1.
+     */
+    @PostMapping("/decrypt")
+    public ResponseEntity<DecryptResponse> decrypt(@Valid @RequestBody DecryptRequest request) {
+        String decryptedXml = xmlEncryptionService.decrypt(
+            request.getEncryptedXml(),
+            request.getKeyAlias(),
+            request.getMessageId());
+
+        return ResponseEntity.ok(DecryptResponse.builder()
+            .decryptedXml(decryptedXml)
+            .keyAlias(request.getKeyAlias())
+            .messageId(request.getMessageId())
             .build());
     }
 

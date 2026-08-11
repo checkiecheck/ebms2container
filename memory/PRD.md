@@ -97,34 +97,53 @@ Bouwen van een moderne ebMS2 adapter conform:
 - [x] `CryptoController.java` – REST API voor sign/verify/keys
 - [x] DTOs: SignRequest, SignResponse, VerifyRequest, VerifyResponse
 
+### Fase 3 (voltooid – februari 2026)
+
+#### XML-Enc Encryptie (crypto-service)
+- [x] `XmlEncryptionService.java` – AES-256-GCM encryptie + RSA-OAEP sleutelinkapseling
+- [x] `EncryptRequest.java` / `EncryptResponse.java` – request/response DTOs
+- [x] `DecryptRequest.java` / `DecryptResponse.java` – request/response DTOs
+- [x] `CryptoController` uitgebreid: `POST /api/crypto/encrypt` + `POST /api/crypto/decrypt`
+
+#### CPA-Validatie in Orchestrator
+- [x] `CpaValidationService.java` – HTTP-aanroep naar cpa-service (CPA status + OIN check)
+- [x] `CpaValidationResult.java` – resultaat-klasse (success/failure/serviceUnavailable)
+- [x] `RestClientConfig.java` – Spring RestClient geconfigureerd voor cpa-service
+- [x] `OrchestratorService` bijgewerkt: CPA-validatie vóór berichtverwerking (fail-closed)
+
+#### Reliable Messaging Retry-Scheduler
+- [x] `RetryProperties.java` – configuratie-properties (max-retries, retry-interval-seconds, etc.)
+- [x] `OrchestratorService.retryFailedMessages()` – `@Scheduled` retry-scheduler
+- [x] `application.yml` bijgewerkt: `retry-check-interval-ms: 300000`
+
+#### Testcontainers Integratietests
+- [x] Parent POM: Testcontainers BOM 1.20.4 (vóór Spring Boot BOM)
+- [x] Module POMs: junit-jupiter, postgresql, rabbitmq Testcontainers afhankelijkheden (scope=test)
+- [x] `CpaServiceIntegrationTest.java` – CRUD testen met echte PostgreSQL-container
+- [x] `OrchestratorServiceIntegrationTest.java` – retry-scheduler + TTL-expiry (PostgreSQL + RabbitMQ TC)
+- [x] `CryptoAuditLogRepositoryIntegrationTest.java` – audit log persistentie (PostgreSQL TC)
+
 ---
 
 ## Geprioriteerde Backlog
 
-### P0 – Fase 3: SOAP Endpoint uitbreiding + CPA-integratie
-- [ ] CPA-validatie in OrchestratorService (HTTP-call naar cpa-service)
-- [ ] OIN-validatie via cpa-service (partyId ↔ X-Forwarded-Client-OIN check)
+### P0 – Fase 4: auditor-service (NIEUW)
+- [ ] Aparte Spring Boot microservice op poort 8083 voor append-only audit-events
+- [ ] Verwerkt `AuditEvent` AMQP-berichten van orchestrator en crypto-service
+- [ ] PostgreSQL-schema met `audit_event` tabel
+- [ ] REST API voor querying van audit-events
+
+### P1 – Fase 5: Ingress Proxy + mTLS
+- [ ] Nginx/HAProxy als mTLS-offloader
+- [ ] OIN-header injectie (X-Forwarded-Client-OIN) vanuit client-certificaat
+- [ ] Kubernetes NetworkPolicy-configuratie
+
+### P2 – Fase 6: Productie-klaar
+- [ ] Kubernetes manifesten (Deployment, Service, Ingress, NetworkPolicy)
+- [ ] Prometheus/Grafana monitoring dashboards
 - [ ] WSDL-generatie voor het SOAP-endpoint
 - [ ] SOAP MTOM-attachment verwerking
-
-### P1 – Fase 4: XML-Enc encryptie
-- [ ] `XmlEncryptionService.java` – AES-256-GCM data-encryptie + RSA-OAEP sleutelinkapseling
-- [ ] Decryptie via crypto-service REST API
-
-### P1 – Fase 5: Volledige Reliable Messaging
-- [ ] Retry-scheduler (configureerbaar per CPA-profiel)
 - [ ] ACK-ontvangst verwerking (inkomende Acknowledgment berichten)
-- [ ] Duplicate elimination sliding window optimalisatie
-
-### P2 – Fase 6: auditor-service
-- [ ] Aparte Spring Boot service voor append-only event opslag
-- [ ] Verwerkt AuditEvent AMQP-berichten van orchestrator en crypto-service
-
-### P3 – Fase 7: Productie-klaar
-- [ ] Kubernetes manifesten (Deployment, Service, Ingress, NetworkPolicy)
-- [ ] mTLS Ingress Proxy configuratie
-- [ ] Prometheus/Grafana monitoring dashboards
-- [ ] Integratie tests (Testcontainers + JUnit 5)
 
 ---
 

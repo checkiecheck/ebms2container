@@ -1,0 +1,46 @@
+{
+  "summary": "Code review (Fase 3) van Digikoppeling ebMS2 Adapter – Java 21 / Spring Boot 3.4 multi-module Maven project. Geen Java/Maven runtime beschikbaar; puur statische code-review uitgevoerd op alle gewijzigde bestanden.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "OrchestratorServiceIntegrationTest.java",
+        "issue": "@MockBean is deprecated in Spring Boot 3.4 – vervang door @MockitoBean (import: org.springframework.test.context.bean.override.mockito.MockitoBean). Genereert deprecation-waarschuwingen bij compilatie maar compileert nog wel.",
+        "priority": "LOW"
+      },
+      {
+        "endpoint": "pom.xml (parent)",
+        "issue": "Testcontainers BOM (1.20.4) staat ACHTER de Spring Boot BOM in <dependencyManagement>. Maven honoreert de EERSTE BOM-declaratie; de explicit Testcontainers BOM wordt effectief genegeerd ten gunste van de Spring Boot-beheerde versie. Oplossing: zet Testcontainers BOM VÓÓR de Spring Boot BOM, of verwijder het als Spring Boot 3.4.1 al de juiste versie beheert.",
+        "priority": "LOW"
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Vervang @MockBean door @MockitoBean in OrchestratorServiceIntegrationTest.java om deprecation-waarschuwingen te elimineren (Spring Boot 3.4+).",
+    "Verplaats Testcontainers BOM-import vóór Spring Boot BOM in parent pom.xml als Testcontainers versie 1.20.4 expliciet vereist is."
+  ],
+  "critical_code_review_comments": [
+    "CryptoController (regels 82-117): Correct geïmplementeerd. XmlEncryptionService als private final field via @RequiredArgsConstructor. Alle DTO-imports via wildcard nl.logius.ebms.crypto.dto.*. Foutafhandeling via @ExceptionHandler aanwezig.",
+    "OrchestratorService: CpaValidationService en RetryProperties correct gedeclareerd als final fields. CpaValidationResult is in hetzelfde package (geen import nodig). @Scheduled-annotations zijn syntactisch correct: fixedDelayString='PT1H' (ISO-8601) en fixedDelayString='${...}' (ms-waarde) zijn beide geldig in Spring 6.x.",
+    "@EnableScheduling aanwezig in EbmsOrchestratorApplication.java – retryFailedMessages() zal correct worden getriggerd.",
+    "CryptoAuditLogEntity.performedAt is @CreationTimestamp – wordt automatisch ingesteld door Hibernate; test-assertie isNotNull() is correct.",
+    "Alle EbmsMessageEntity-velden (timeToLive, lastRetryAt, retryCount) bestaan en worden correct gebruikt in OrchestratorServiceIntegrationTest.",
+    "EbmsMessageRepository bevat alle benodigde query-methoden: findMessagesForRetry, findExpiredMessages, findByMessageId, existsByMessageId.",
+    "Module POMs zijn syntactisch correct. Testcontainers-afhankelijkheden (junit-jupiter, postgresql, rabbitmq) hebben correct scope=test."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "N/A (geen runtime – code-review only)",
+    "frontend": "N/A (geen frontend)"
+  },
+  "seed_data_creation": "",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Dit is een pure Java Maven project zonder running server. Java/Maven/Docker niet beschikbaar in preview-omgeving. Testcontainers integratietests vereisen Docker daemon. Enige openstaande punten: @MockBean deprecation (minor) en Testcontainers BOM-volgorde (minor). Kern-implementatie (CryptoController encrypt/decrypt endpoints, OrchestratorService CPA-validatie + retry-scheduler) is correct geïmplementeerd."
+}
