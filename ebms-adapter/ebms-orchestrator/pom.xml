@@ -115,6 +115,13 @@
             <scope>test</scope>
         </dependency>
 
+        <!-- ── Awaitility – asynchrone asserties in @RabbitListener-tests ── -->
+        <dependency>
+            <groupId>org.awaitility</groupId>
+            <artifactId>awaitility</artifactId>
+            <scope>test</scope>
+        </dependency>
+
     </dependencies>
 
     <build>

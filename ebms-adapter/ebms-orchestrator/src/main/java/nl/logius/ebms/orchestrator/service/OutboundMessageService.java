@@ -173,31 +173,46 @@ public class OutboundMessageService {
             ? header.getTo().get(0).getValue() : "UNKNOWN";
         String messageId   = message.getMessageId();
 
-        // TTL berekenen uit CPA persistDuration (in seconden)
-        Instant ttl = channel.getPersistDuration() != null
-            ? Instant.now().plusSeconds(channel.getPersistDuration()) : null;
+        // ── Idempotente upsert: bij retry hetzelfde bericht bijwerken ──────────
+        // Zonder dit levert een requeue-cyclus een unique-constraint fout op
+        // (messageId-kolom is unique=true in EbmsMessageEntity).
+        return messageRepository.findByMessageId(messageId)
+            .map(existing -> {
+                // Bijwerken wat kan zijn gewijzigd (bijv. nieuw gesigneerde/versleutelde SOAP)
+                existing.setRawSoapXml(rawSoapXml);
+                existing.setPayloadRef(message.getPayloadRef());
+                existing.setPayloadContentType(message.getPayloadContentType());
+                existing.setStatus(MessageStatus.PROCESSING);
+                log.debug("[OUTBOUND] Idempotente herverwerking: messageId={}", messageId);
+                return messageRepository.save(existing);
+            })
+            .orElseGet(() -> {
+                // TTL berekenen uit CPA persistDuration (in seconden)
+                Instant ttl = channel.getPersistDuration() != null
+                    ? Instant.now().plusSeconds(channel.getPersistDuration()) : null;
 
-        EbmsMessageEntity entity = EbmsMessageEntity.builder()
-            .messageId(messageId)
-            .conversationId(header.getConversationId())
-            .cpaId(header.getCpaId())
-            .fromPartyId(fromPartyId)
-            .toPartyId(toPartyId)
-            .fromRole(header.getFromRole())
-            .toRole(header.getToRole())
-            .service(header.getService() != null ? header.getService().getValue() : "UNKNOWN")
-            .serviceType(header.getService() != null ? header.getService().getType() : null)
-            .action(header.getAction())
-            .direction(MessageDirection.OUTBOUND)
-            .status(MessageStatus.PROCESSING)
-            .timestamp(Instant.now())
-            .timeToLive(ttl)
-            .payloadRef(message.getPayloadRef())
-            .payloadContentType(message.getPayloadContentType())
-            .rawSoapXml(rawSoapXml)
-            .build();
+                EbmsMessageEntity entity = EbmsMessageEntity.builder()
+                    .messageId(messageId)
+                    .conversationId(header.getConversationId())
+                    .cpaId(header.getCpaId())
+                    .fromPartyId(fromPartyId)
+                    .toPartyId(toPartyId)
+                    .fromRole(header.getFromRole())
+                    .toRole(header.getToRole())
+                    .service(header.getService() != null ? header.getService().getValue() : "UNKNOWN")
+                    .serviceType(header.getService() != null ? header.getService().getType() : null)
+                    .action(header.getAction())
+                    .direction(MessageDirection.OUTBOUND)
+                    .status(MessageStatus.PROCESSING)
+                    .timestamp(Instant.now())
+                    .timeToLive(ttl)
+                    .payloadRef(message.getPayloadRef())
+                    .payloadContentType(message.getPayloadContentType())
+                    .rawSoapXml(rawSoapXml)
+                    .build();
 
-        return messageRepository.save(entity);
+                return messageRepository.save(entity);
+            });
     }
 
     private String extractToPartyId(EbxmlMessageHeader header) {

@@ -1,0 +1,180 @@
+{
+  "summary": "Statische code-review iteratie 5 – uitsluitend OutboundPipelineIntegrationTest.java + pom.xml Awaitility-toevoeging. Alle 10 tests, imports, @MockitoBean-beans, Awaitility-configuratie en DLQ-mechanisme volledig doorgelopen. Één kritiek probleem gevonden (Test 7 retry – unique constraint), één misleidende @DisplayName, en twee minor observaties.",
+  "backend_issues": {
+    "critical": [
+      {
+        "component": "OutboundMessageService – persistOutboundMessage() – retrylogica (Test 7)",
+        "issue": "OutboundMessageService heeft GEEN idempotentie/upsert-logica voor herverwerking. Bij nack(requeue=true) na een EbmsException wordt het bericht opnieuw afgeleverd. De service roept echter opnieuw persistOutboundMessage() aan, dat een nieuwe INSERT probeert met hetzelfde messageId (unique constraint: @Column unique=true). Dit levert een DataIntegrityViolationException op de tweede poging, gevolgd door nack(requeue=true) → oneindige lus / DLQ. Test 7 ('EbmsException retry → awaitStatus DELIVERED') zal in praktijk NOOIT slagen met de huidige serviceimplementatie. Oplossing: voeg findByMessageId().map()/orElseGet() toe vóór de INSERT, of gebruik een findOrCreate-patroon.",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": [
+      {
+        "component": "OutboundPipelineIntegrationTest – Test 7 @DisplayName vs. assertion mismatch",
+        "issue": "@DisplayName zegt 'status PROCESSING (geen DELIVERED)' maar de test roept awaitStatus(msgId, MessageStatus.DELIVERED) aan. De testnaam is misleidend/onjuist en zal verwarring veroorzaken bij CI-rapportage.",
+        "priority": "LOW"
+      },
+      {
+        "component": "OutboundPipelineIntegrationTest – buildOutboundMessage() requireSigning/requireEncryption-velden",
+        "issue": "buildOutboundMessage() vult requireSigning en requireEncryption in EbmsOutboundMessage. OutboundMessageService gebruikt deze velden echter NIET – het leidende gedrag komt uitsluitend van EbxmlProfile.fromCode(channel.getDkProfile()). De velden zijn daarmee dode parameters in de test. Cosmetisch probleem: geen impact op testresultaten, maar kan verwarrend zijn.",
+        "priority": "LOW"
+      },
+      {
+        "component": "OutboundPipelineIntegrationTest – Test 8 audit-event race condition",
+        "issue": "receiveFromQueue(QUEUE_AUDIT, 5_000) wordt aangeroepen direct na awaitStatus(DELIVERED). awaitStatus confirmeert alleen de DB-status; de audit-event publish (rabbitTemplate.convertAndSend in publishAudit()) kan nog in-flight zijn. De 5s receive-timeout compenseert dit doorgaans, maar het is een potentieel flakey scenario als RabbitMQ traag is. Overweeg een kortere Awaitility-wait vóór de receive() of verhoog de receive-timeout.",
+        "priority": "LOW"
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "checklist_results": {
+    "(a) imports correct en volledig": {
+      "import static org.awaitility.Awaitility.await": "PASS – regel 36",
+      "import java.time.Duration": "PASS – regel 31",
+      "import org.mockito.InOrder": "PASS – regel 18",
+      "import org.springframework.test.context.bean.override.mockito.MockitoBean": "PASS – regel 25 (Spring Boot 3.4+)",
+      "EbmsOutboundMessage, AuditEvent": "PASS – regels 4-5",
+      "DeliveryChannelDto": "PASS – regel 6",
+      "nl.logius.ebms.common.model.ebxml.*": "PASS – wildcard dekt EbxmlMessageHeader, PartyId, ServiceType, MessageInfo, EbxmlProfile",
+      "RabbitMqConfig, EbmsMessageEntity, MessageStatus, EbmsMessageRepository": "PASS – regels 8-11",
+      "CpaChannelCacheService, CryptoServiceClient, OutboundSoapClient": "PASS – regels 12-14",
+      "EbmsException (Test 7)": "PASS – fully-qualified naam gebruikt (nl.logius.ebms.common.exception.EbmsException), geen import vereist",
+      "assertThat (AssertJ)": "PASS – import static org.assertj.core.api.Assertions.assertThat – regel 35",
+      "inOrder(), verify(), verifyNoInteractions(), times()": "PASS – import static org.mockito.Mockito.* – regel 38",
+      "anyString(), eq(), argThat(), any()": "PASS – import static org.mockito.ArgumentMatchers.* – regel 37",
+      "java.time.Instant, java.util.List": "PASS – regels 32-33",
+      "Testcontainers (Container, Testcontainers, PostgreSQLContainer, RabbitMQContainer)": "PASS – regels 26-29"
+    },
+    "(b) drie @MockitoBean beans": {
+      "CpaChannelCacheService": "PASS – regels 91-92",
+      "OutboundSoapClient": "PASS – regels 94-95",
+      "CryptoServiceClient": "PASS – regels 97-98"
+    },
+    "(c) Awaitility in pom.xml – scope=test, geen versienummer": {
+      "dependency aanwezig": "PASS – regels 118-123",
+      "scope=test": "PASS – regel 122",
+      "geen <version>-tag": "PASS – versie wordt beheerd door Spring Boot BOM (awaitility 4.x)",
+      "groupId/artifactId correct": "PASS – org.awaitility / awaitility"
+    },
+    "(d) awaitStatus() helper – atMost/pollInterval/untilAsserted": {
+      "atMost(Duration.ofSeconds(15))": "PASS – regel 476",
+      "pollInterval(Duration.ofMillis(250))": "PASS – regel 477",
+      "untilAsserted(...)": "PASS – regels 478-486",
+      "orElseThrow met AssertionError als bericht nog niet in DB": "PASS – goede foutmelding voor debuggen",
+      "assertThat(entity.getStatus()).isEqualTo(expected)": "PASS – correcte assertion"
+    },
+    "Test 1 (osb-be)": {
+      "EbxmlProfile.OSB_BE.requiresSigning()": "PASS – false (enum bevestigd)",
+      "EbxmlProfile.OSB_BE.requiresEncryption()": "PASS – false",
+      "EbxmlProfile.OSB_BE.hasReliableMessaging()": "PASS – false",
+      "awaitStatus DELIVERED": "PASS – BE → DELIVERED in service",
+      "verifyNoInteractions(cryptoServiceClient)": "PASS",
+      "verify(outboundSoapClient).send(ENDPOINT, anyString())": "PASS",
+      "entity.isAckRequested() = false": "PASS"
+    },
+    "Test 2 (osb-rm)": {
+      "EbxmlProfile.OSB_RM.hasReliableMessaging()": "PASS – true",
+      "awaitStatus SENT": "PASS – RM → SENT in service",
+      "entity.isAckRequested() = true": "PASS – service zet ackRequested=true bij requireAck",
+      "verifyNoInteractions(cryptoServiceClient)": "PASS"
+    },
+    "Test 3 (osb-be-s)": {
+      "EbxmlProfile.OSB_BE_S.requiresSigning()": "PASS – true",
+      "EbxmlProfile.OSB_BE_S.requiresEncryption()": "PASS – false",
+      "awaitStatus DELIVERED": "PASS – BE (geen RM)",
+      "verify sign(anyString, 'signing-key', msgId)": "PASS – alias via @Value default",
+      "verify never encrypt": "PASS",
+      "verify send met argThat(xml -> xml.startsWith('SIGNED:'))": "PASS – mock geeft 'SIGNED:'+original"
+    },
+    "Test 4 (osb-rm-s)": {
+      "EbxmlProfile.OSB_RM_S.requiresSigning()": "PASS – true",
+      "EbxmlProfile.OSB_RM_S.hasReliableMessaging()": "PASS – true",
+      "awaitStatus SENT": "PASS",
+      "sign aangeroepen, encrypt nooit": "PASS",
+      "entity.isAckRequested() = true": "PASS"
+    },
+    "Test 5 (osb-rm-e)": {
+      "EbxmlProfile.OSB_RM_E.requiresSigning()": "PASS – true",
+      "EbxmlProfile.OSB_RM_E.requiresEncryption()": "PASS – true",
+      "EbxmlProfile.OSB_RM_E.hasReliableMessaging()": "PASS – true",
+      "InOrder sign → encrypt": "PASS – service: step 3 sign, step 4 encrypt",
+      "inOrder.verify sign(anyString, 'signing-key', msgId)": "PASS",
+      "inOrder.verify encrypt(anyString, TO_OIN, msgId)": "PASS – recipientAlias = toPartyId = extractToPartyId(header) = TO_OIN",
+      "verify send argThat(xml -> xml.startsWith('ENCRYPTED:SIGNED:'))": "PASS – encrypt(sign(xml)) = 'ENCRYPTED:SIGNED:...'",
+      "entity.getRawSoapXml().startsWith('ENCRYPTED:SIGNED:')": "PASS – rawSoapXml gezet vóór persist",
+      "entity.isAckRequested() = true": "PASS"
+    },
+    "Test 6 (null header)": {
+      "service null-guard": "PASS – if (header == null || header.getCpaId() == null) → nack(requeue=false)",
+      "DLQ routing": "PASS – outboundQueue heeft x-dead-letter-exchange='' en x-dead-letter-routing-key='ebms.dlq'; deadLetterQueue() is durable queue 'ebms.dlq' gebonden aan default exchange",
+      "rabbitTemplate.receive(QUEUE_DLQ, 10_000) != null": "PASS – dead-letter routing correct geconfigureerd",
+      "existsByMessageId = false": "PASS – service returned vóór persistOutboundMessage()",
+      "verifyNoInteractions crypto + soap": "PASS"
+    },
+    "Test 7 (EbmsException retry)": {
+      "mock setup": "PASS – thenThrow().thenReturn(null)",
+      "CRITICAL issue": "FAIL – zie backend_issues.critical: op tweede poging probeert service duplicate INSERT met zelfde messageId → unique constraint violation → test zal NIET convergeren naar DELIVERED",
+      "@DisplayName vs. assertion": "FAIL – displayName zegt 'geen DELIVERED', test asserteert DELIVERED – misleidend"
+    },
+    "Test 8 (audit event)": {
+      "eventType = MESSAGE_SENT": "PASS – service regel 139",
+      "messageId, cpaId, result=SUCCESS, action=TestAction": "PASS",
+      "receiveFromQueue na awaitStatus": "MINOR – potentieel flakey (5s timeout is normaal voldoende)"
+    },
+    "Test 9 (payload metadata)": {
+      "payloadRef, payloadContentType in entity": "PASS – service kopieert message.getPayloadRef() en getPayloadContentType() in persistOutboundMessage()"
+    },
+    "Test 10 (meerdere berichten)": {
+      "5 berichten, alle DELIVERED": "PASS – configuratie osb-be correct",
+      "messageId range 'out-multi-001'...'out-multi-005'": "PASS – geen collision",
+      "count() >= 5": "PASS – deleteAll() in @BeforeEach, daarna 5 nieuwe berichten",
+      "verify send times(5)": "PASS"
+    },
+    "buildHeader() correctheid": {
+      "ServiceType.builder().value('urn:test:service')": "PASS – service-kolom in entity via service.getValue()",
+      "MessageInfo.builder().messageId+timestamp": "PASS",
+      "from/to één element, geen NPE": "PASS – extractToPartyId() en fromPartyId-extractie: isEmpty() guard aanwezig",
+      "fromRole='aanbieder', toRole='afnemer'": "PASS"
+    },
+    "DLQ dead-letter config RabbitMqConfig.java": {
+      "outboundQueue x-dead-letter-exchange=''": "PASS – default exchange (regels 73-77)",
+      "outboundQueue x-dead-letter-routing-key='ebms.dlq'": "PASS – QUEUE_DLQ constant = 'ebms.dlq'",
+      "deadLetterQueue() bean 'ebms.dlq'": "PASS – regel 90-92, geen binding naar ebms.exchange nodig (default exchange gebruikt queue-naam als routing key)"
+    }
+  },
+  "test_report_links": [
+    "/app/ebms-adapter/ebms-orchestrator/src/test/java/nl/logius/ebms/orchestrator/OutboundPipelineIntegrationTest.java",
+    "/app/ebms-adapter/ebms-orchestrator/pom.xml"
+  ],
+  "action_items": [
+    "CRITICAL: Voeg idempotentie/upsert-logica toe aan OutboundMessageService.persistOutboundMessage(). Gebruik findByMessageId(messageId) vóór save() en werk de bestaande entity bij als die al bestaat. Zonder deze fix zal Test 7 falen met DataIntegrityViolationException op de tweede poging.",
+    "LOW: Corrigeer @DisplayName van Test 7 van 'status PROCESSING (geen DELIVERED)' naar iets als 'EbmsException bij eerste send: bericht gerequeued, tweede poging succesvol → status DELIVERED'.",
+    "LOW: Overweeg de requireSigning/requireEncryption-parameters uit buildOutboundMessage() te verwijderen of toe te lichten dat ze door de service genegeerd worden (EbxmlProfile is leidend). Alternatief: verwijder de velden uit EbmsOutboundMessage als ze nooit door de service worden gebruikt.",
+    "LOW: Verhoog receive-timeout in receiveFromQueue (Test 8) van 5s naar 10s, of voeg een kleine Awaitility-wait toe voor de audit-receive om flakey gedrag te voorkomen."
+  ],
+  "critical_code_review_comments": [
+    "CRITICAL: OutboundMessageService.handleOutboundMessage() mist idempotentie bij retry. Step 5 (persistOutboundMessage) wordt uitgevoerd vóór step 6 (send). Als send een EbmsException gooit en nack(requeue=true) wordt gedaan, is de entity al gecommit (transactie slaagt omdat exception intern opgevangen wordt). Bij tweede delivery probeert step 5 opnieuw een INSERT met hetzelfde messageId → unieke-constraintfout. Fix: check existsByMessageId() of gebruik findByMessageId().map(...).orElseGet(...) patroon.",
+    "MINOR: Test 7 @DisplayName is inhoudelijk onjuist – zegt 'geen DELIVERED' terwijl test awaitStatus DELIVERED aanroept. Dit geeft verwarring bij CI-rapportage.",
+    "MINOR: requireSigning/requireEncryption velden in EbmsOutboundMessage worden niet gebruikt door de service. Overweeg ze te verwijderen of te documenteren dat EbxmlProfile leidend is.",
+    "Alle overige tests (1-6, 8-10): imports correct, @MockitoBean correct (3 beans), Awaitility pom.xml correct (scope=test, geen versienummer), awaitStatus() correct (atMost 15s, pollInterval 250ms, untilAsserted), DLQ-configuratie correct, InOrder sign→encrypt correct voor Test 5."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "90% (9/10 tests logisch correct; Test 7 heeft kritiek implementatieprobleem in service)",
+    "frontend": "N/A"
+  },
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteratie 5: statische review OutboundPipelineIntegrationTest.java afgerond. Kritiek probleem: OutboundMessageService mist upsert/idempotentie-logica voor retries – tweede delivery van zelfde messageId gooit unique constraint violation. Test 7 zal falen totdat service gefixed is. Overige 9 tests zijn logisch correct. Imports volledig, @MockitoBean correct (3 beans), Awaitility pom.xml correct. DLQ-configuratie (default exchange + x-dead-letter-routing-key=ebms.dlq) correct voor Test 6.",
+  "rca_of_issue": {
+    "test7_retry_bug": {
+      "root_cause": "OutboundMessageService.handleOutboundMessage() is @Transactional. Bij EbmsException na send(): de catch-block roept nack(requeue=true) aan en returnt normaal → Spring commit de transactie inclusief de persist in step 5. Bij tweede delivery: persistOutboundMessage() probeert opnieuw INSERT met messageId dat al bestaat (unique=true constraint op EbmsMessageEntity.messageId) → DataIntegrityViolationException → transaction rollback → catch(Exception e) → nack(requeue=true) → oneindige lus of DLQ.",
+      "reproduction": "Test 7: outboundSoapClient.send() throw+return stub. Eerste attempt: persist(PROCESSING) → send throw → nack(requeue=true) commit. Tweede attempt: persist() duplicate INSERT → exception → oneindige retry.",
+      "mitigation": "Voeg vóór de save() in persistOutboundMessage() toe: Optional<EbmsMessageEntity> existing = messageRepository.findByMessageId(messageId); if (existing.isPresent()) { EbmsMessageEntity e = existing.get(); e.setRawSoapXml(rawSoapXml); return messageRepository.save(e); } Dan INSERT of UPDATE op basis van bestaande entity."
+    }
+  }
+}

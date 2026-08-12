@@ -117,7 +117,25 @@ Bouwen van een moderne ebMS2 adapter conform:
 - [x] `application.yml` bijgewerkt: `retry-check-interval-ms: 300000`
 
 #### Testcontainers Integratietests (uitgebreid – februari 2026)
-- [x] `InboundPipelineIntegrationTest.java` – 9 testscenario's voor de volledige inbound pipeline:
+- [x] `InboundPipelineIntegrationTest.java` – 9 testscenario's inbound pipeline (zie Fase 5)
+- [x] `OutboundPipelineIntegrationTest.java` – 10 testscenario's outbound pipeline:
+  - osb-be (Best Effort): geen crypto, status DELIVERED
+  - osb-rm (Reliable Messaging): geen crypto, status SENT, isAckRequested=true
+  - osb-be-s (signing only): sign aangeroepen, DELIVERED
+  - osb-rm-s (signing + RM): sign aangeroepen, SENT
+  - osb-rm-e (sign + encrypt): InOrder sign→encrypt, verstuurde XML='ENCRYPTED:SIGNED:...', SENT
+  - Foutpad: null header → nack(requeue=false) → DLQ, geen DB-opslag
+  - Retry: EbmsException eerste poging → requeue → tweede poging DELIVERED (upsert-idempotentie)
+  - Audit-event: MESSAGE_SENT op ebms.audit.events
+  - Payload-metadata: payloadRef/payloadContentType correct gepersisteerd
+  - Throughput: 5 opeenvolgende berichten allemaal DELIVERED
+- [x] Awaitility toegevoegd aan ebms-orchestrator pom.xml (scope=test, versie via Spring Boot BOM)
+
+#### Bug-fix (februari 2026)
+- [x] `OutboundMessageService.persistOutboundMessage()` – idempotente upsert toegevoegd:
+  `findByMessageId().map(UPDATE).orElseGet(INSERT)` — lost unique-constraint fout op bij RabbitMQ retry (nack + requeue)
+
+
   - osb-be (plaintext): geen crypto, persistentie en AMQP-publish geverifieerd
   - osb-be-s (signed): `CryptoServiceClient.verify()` aangeroepen, decrypt NIET
   - osb-be-e (encrypted): `CryptoServiceClient.decrypt()` aangeroepen, ontsleutelde SOAP opgeslagen

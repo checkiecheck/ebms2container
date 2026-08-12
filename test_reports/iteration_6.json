@@ -1,0 +1,75 @@
+{
+  "summary": "Statische code-review iteratie 6 – verificatie van drie fixes uit iteratie-5 actiepunten: (1) upsert-logica in OutboundMessageService.persistOutboundMessage(), (2) @DisplayName Test 7, (3) receiveFromQueue timeout 10s. Alle drie fixes zijn correct geïmplementeerd. Geen nieuwe kritieke problemen gevonden.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "checklist_results": {
+    "Fix 1 – upsert-logica persistOutboundMessage() (regels 179-215)": {
+      "findByMessageId().map().orElseGet() patroon aanwezig": "PASS – regel 179: messageRepository.findByMessageId(messageId).map(...).orElseGet(...)",
+      "(a) eerste aanroep – orElseGet() pad (nieuwe INSERT)": "PASS – Optional.empty() → orElseGet() bouwt volledige EbmsMessageEntity met alle velden (messageId, conversationId, cpaId, fromPartyId, toPartyId, fromRole, toRole, service, serviceType, action, direction=OUTBOUND, status=PROCESSING, timestamp, timeToLive, payloadRef, payloadContentType, rawSoapXml) en roept messageRepository.save(entity) aan",
+      "(b) tweede aanroep (retry) – map() pad bijwerkt rawSoapXml + status=PROCESSING": "PASS – regels 182-186: existing.setRawSoapXml(rawSoapXml); existing.setPayloadRef(...); existing.setPayloadContentType(...); existing.setStatus(PROCESSING); return messageRepository.save(existing)",
+      "(c) Instant TTL-berekening correct in orElseGet()": "PASS – regels 191-192: Instant ttl = channel.getPersistDuration() != null ? Instant.now().plusSeconds(channel.getPersistDuration()) : null; – ongewijzigd aanwezig in orElseGet(), TTL-logica niet aangeraakt",
+      "(d) bestaande entity behoudt ongewijzigde velden": "PASS – map()-pad update ALLEEN rawSoapXml, payloadRef, payloadContentType, status. Velden messageId, conversationId, cpaId, fromPartyId, toPartyId, fromRole, toRole, service, serviceType, action, direction, timestamp, timeToLive, ackRequested worden NIET overschreven → oorspronkelijke metadata intact",
+      "unique-constraint bug opgelost": "PASS – tweede delivery vindt entity via findByMessageId() → UPDATE i.p.v. duplicate INSERT → DataIntegrityViolationException treedt niet meer op"
+    },
+    "Fix 1 – Test 7 scenario end-to-end redenering": {
+      "Eerste aanroep: orElseGet() INSERT(PROCESSING) → send gooit EbmsException → catch(EbmsException) → nack(requeue=true) → transactie gecommit (entity in DB, status=PROCESSING)": "PASS – logisch correct",
+      "Tweede aanroep: findByMessageId() vindt entity → map() UPDATE(rawSoapXml, status=PROCESSING) → send retourneert null → requireAck=false (osb-be) → entity.setStatus(DELIVERED) → save() → commit": "PASS – logisch correct",
+      "awaitStatus(DELIVERED) zal nu slagen": "PASS – geen blocking constraint meer; entiteit bereikt DELIVERED na tweede poging",
+      "verify(outboundSoapClient, times(2)).send(eq(ENDPOINT), anyString())": "PASS – send wordt precies twee keer aangeroepen (eerste keer throw, tweede keer return null)"
+    },
+    "Fix 2 – @DisplayName Test 7 (regel 298)": {
+      "Nieuwe tekst": "PASS – 'EbmsException bij eerste send: bericht gerequeued, tweede poging succesvol → status DELIVERED'",
+      "Overeenkomst met testlogica (awaitStatus DELIVERED)": "PASS – displayName beschrijft nu correct het verwachte pad: eerste poging gooit exception + requeue, tweede poging succesvol → DELIVERED",
+      "Misleidende tekst 'geen DELIVERED' verwijderd": "PASS – oude tekst 'status PROCESSING (geen DELIVERED)' is vervangen"
+    },
+    "Fix 3 – receiveFromQueue() timeout 10s (regel 496)": {
+      "Oude timeout was 5_000ms": "N/A (iteratie 5 issue was 5s potentieel flakey)",
+      "Nieuwe timeout": "PASS – rabbitTemplate.receive(queueName, 10_000) – 10 seconden",
+      "Toegepast in Test 8 audit-event via receiveFromQueue(QUEUE_AUDIT, AuditEvent.class)": "PASS – helper gebruikt 10s"
+    },
+    "Fix 4 – buildOutboundMessage() Javadoc (regels 412-422)": {
+      "Javadoc aanwezig": "PASS – uitgebreide /** ... */ block aanwezig boven buildOutboundMessage()",
+      "Toelichting requireSigning/requireEncryption niet gebruikt door service": "PASS – 'worden door OutboundMessageService niet gebruikt – het gedrag wordt uitsluitend bepaald door EbxmlProfile.fromCode(channel.getDkProfile())'",
+      "Reden voor aanwezigheid parameters toegelicht": "PASS – 'De parameters zijn hier meegenomen voor documentatiedoeleinden en toekomstige implementatie-uitbreidingen'",
+      "@param tags aanwezig en correct": "PASS – @param messageId, @param requireSigning (decoratief – profiel is leidend), @param requireEncryption (decoratief – profiel is leidend)"
+    },
+    "Geen regressie geïntroduceerd": {
+      "Tests 1-6, 8-10 onaangetast": "PASS – persistOutboundMessage() gedrag voor happy-path (geen bestaande entity) is identiek aan vóór de fix: orElseGet() levert dezelfde INSERT",
+      "handleOutboundMessage() flow ongewijzigd": "PASS – alle stappen 1-9 intact; alleen step 5 (persistOutboundMessage) heeft interne wijziging",
+      "drainQueue() / setUp() / awaitStatus() / configureChannel() ongewijzigd": "PASS"
+    }
+  },
+  "test_report_links": [
+    "/app/ebms-adapter/ebms-orchestrator/src/main/java/nl/logius/ebms/orchestrator/service/OutboundMessageService.java",
+    "/app/ebms-adapter/ebms-orchestrator/src/test/java/nl/logius/ebms/orchestrator/OutboundPipelineIntegrationTest.java"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Alle drie gefixte punten zijn correct geïmplementeerd. Geen nieuwe kritieke bevindingen.",
+    "MINOR (nieuw): In map()-pad wordt ackRequested NIET gereset naar false. Dit is correct gedrag: ackRequested wordt in handleOutboundMessage() pas NÁ persistOutboundMessage() gezet (regel 129). Bij een retry start de entity met ackRequested=false (default) of de waarde van de vorige geslaagde poging. In het retry-scenario (Test 7: osb-be, geen RM) is ackRequested altijd false omdat de service DELIVERED zet. Geen bug, maar het is goed te beseffen dat ackRequested bij RM-retry correct wordt overschreven door regel 129.",
+    "MINOR (bestaand, niet gefixed): Test 8 race condition (audit-event publish kan nog in-flight zijn na awaitStatus). De verhoogde 10s timeout in receiveFromQueue() vermindert het risico significant. Restrisico is verwaarloosbaar in normale CI-omgevingen."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100% (alle drie fixes correct; Test 7 zal nu convergeren naar DELIVERED)",
+    "frontend": "N/A"
+  },
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Iteratie 6: alle drie iteratie-5 fixes geverifieerd via statische review. (1) upsert-logica OutboundMessageService.persistOutboundMessage() correct: findByMessageId().map(UPDATE).orElseGet(INSERT) – unique constraint bug opgelost, Test 7 zal slagen. (2) @DisplayName Test 7 correct: beschrijft nu tweede poging DELIVERED. (3) receiveFromQueue timeout correct: 10_000ms. (4) buildOutboundMessage() Javadoc correct. Geen openstaande actiepunten. Indien volgende iteratie wordt gevraagd: overweeg compilatie/runnen van de integratietests als definitieve verificatie.",
+  "rca_of_issue": {
+    "upsert_fix_verificatie": {
+      "fix_correct": true,
+      "mechanisme": "findByMessageId() retourneert Optional<EbmsMessageEntity>. map() wordt alleen uitgevoerd als entity bestaat (retry-scenario). orElseGet() wordt alleen uitgevoerd als entity niet bestaat (eerste poging). Dit vermijdt de duplicate-INSERT die in iteratie 5 als kritiek probleem was geïdentificeerd.",
+      "thread_safety": "De upsert is niet atomair (check-then-act pattern). In een scenario met twee gelijktijdige deliveries van hetzelfde messageId (RabbitMQ concurrent consumers) bestaat nog steeds een TOCTOU race. Voor de huidige single-consumer setup is dit geen issue. Bij horizontale scaling (concurrentFactor > 1) is een database-level UPSERT (INSERT ... ON CONFLICT DO UPDATE) robuuster.",
+      "aanbeveling_voor_productie": "Overweeg @Column(unique=true) te combineren met een native UPSERT query of optimistic locking (@Version) als concurrentFactor > 1 wordt geconfigureerd."
+    }
+  }
+}
