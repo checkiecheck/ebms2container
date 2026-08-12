@@ -116,12 +116,19 @@ Bouwen van een moderne ebMS2 adapter conform:
 - [x] `OrchestratorService.retryFailedMessages()` – `@Scheduled` retry-scheduler
 - [x] `application.yml` bijgewerkt: `retry-check-interval-ms: 300000`
 
-#### Testcontainers Integratietests
-- [x] Parent POM: Testcontainers BOM 1.20.4 (vóór Spring Boot BOM)
-- [x] Module POMs: junit-jupiter, postgresql, rabbitmq Testcontainers afhankelijkheden (scope=test)
-- [x] `CpaServiceIntegrationTest.java` – CRUD testen met echte PostgreSQL-container
-- [x] `OrchestratorServiceIntegrationTest.java` – retry-scheduler + TTL-expiry (PostgreSQL + RabbitMQ TC)
-- [x] `CryptoAuditLogRepositoryIntegrationTest.java` – audit log persistentie (PostgreSQL TC)
+#### Testcontainers Integratietests (uitgebreid – februari 2026)
+- [x] `InboundPipelineIntegrationTest.java` – 9 testscenario's voor de volledige inbound pipeline:
+  - osb-be (plaintext): geen crypto, persistentie en AMQP-publish geverifieerd
+  - osb-be-s (signed): `CryptoServiceClient.verify()` aangeroepen, decrypt NIET
+  - osb-be-e (encrypted): `CryptoServiceClient.decrypt()` aangeroepen, ontsleutelde SOAP opgeslagen
+  - osb-rm-e (encrypted + signed): decrypt → verify volgorde gegarandeerd via `InOrder`
+  - Foutpad: ongeldige handtekening → `XmlSecurityException`, geen DB-opslag
+  - Foutpad: dubbele messageId → `DuplicateMessageException`
+  - Foutpad: CPA-validatie geblokkeerd → `EbmsException`, geen crypto-aanroepen
+  - ACK-verwerking: SENT→DELIVERED status + `EbmsAckEvent` op `ebms.ack.events`
+  - Audit: `AuditEvent` `MESSAGE_RECEIVED` gepubliceerd op `ebms.audit.events`
+
+
 
 ---
 

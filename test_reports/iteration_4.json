@@ -1,0 +1,127 @@
+{
+  "summary": "Statische code-review iteratie 4 – uitsluitend InboundPipelineIntegrationTest.java. Alle 10 tests, imports, @MockitoBean, buildSoapXml namespace-correctheid en logische assertions volledig doorgelopen. Geen compilatiefouten of logische testfouten gevonden. Bestand is klaar voor uitvoering.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "component": "InboundPipelineIntegrationTest – buildSentOutboundEntity() (Test 8)",
+        "issue": "rawSoapXml niet gezet in de entity die als SENT-bericht wordt opgeslagen. De kolom is nullable (geen NOT NULL constraint in EbmsMessageEntity), dus geen DB-fout. Toch inconsistent met productiegedrag waar rawSoapXml altijd gevuld is. Overweeg .rawSoapXml('<soap/>') toe te voegen voor volledigheid.",
+        "priority": "LOW"
+      },
+      {
+        "component": "InboundPipelineIntegrationTest – buildSoapXml() vs buildHeader() conversationId",
+        "issue": "In buildSoapXml() wordt conversationId als 'conv-' + messageId opgebouwd (bijv. 'conv-msg-enc-001'), terwijl buildHeader() een eigen conversationId parameter krijgt (bijv. 'conv-enc-001'). Deze twee waarden komen niet overeen. Heeft geen impact op testuitkomsten omdat de orchestrator de DTO-waarde gebruikt, niet de waarde uit de XML-string. Toch verwarrend als iemand de testdata later vergelijkt.",
+        "priority": "LOW"
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "checklist_results": {
+    "(a) imports correct en volledig": {
+      "nl.logius.ebms.common.model.ebxml.*": "PASS – wildcard dekt EbxmlMessageHeader, PartyId, ServiceType, MessageInfo, AckRequested",
+      "assertThatCode": "PASS – import static org.assertj.core.api.Assertions.* bevat assertThatCode (regel 44)",
+      "assertThatThrownBy, assertThat": "PASS – zelfde wildcard import",
+      "InOrder, inOrder()": "PASS – import org.mockito.InOrder (regel 25) + import static org.mockito.Mockito.* (regel 46)",
+      "@MockitoBean": "PASS – import org.springframework.test.context.bean.override.mockito.MockitoBean (regel 32, Spring Boot 3.4+)",
+      "RabbitMqConfig, EbmsMessageEntity, MessageDirection, MessageStatus": "PASS – alle aanwezig (regels 12-16)",
+      "CpaValidationResult, CpaValidationService, CryptoServiceClient": "PASS – regels 17-19"
+    },
+    "(b) @MockitoBean aanwezig voor beide beans": {
+      "CpaValidationService": "PASS – regel 99-100",
+      "CryptoServiceClient": "PASS – regel 102-103"
+    },
+    "(c) buildSoapXml() Signature namespace – hasSignature() correctheid": {
+      "buildSoapXml withSig=true": "PASS – sh.addChildElement('Signature', 'ds', 'http://www.w3.org/2000/09/xmldsig#') op SOAPHeader (regel 441)",
+      "SoapHelper.hasSignature()": "PASS – header.getElementsByTagNameNS('http://www.w3.org/2000/09/xmldsig#', 'Signature') → namespace exact gelijk",
+      "Namespace match": "PASS – XML_DSIG_NS in SoapHelper = 'http://www.w3.org/2000/09/xmldsig#' (regel 32)"
+    },
+    "(d) buildSoapXml() EncryptedData namespace – hasEncryptedBody() correctheid": {
+      "buildSoapXml withEnc=true": "PASS – body.addChildElement('EncryptedData', 'xenc', 'http://www.w3.org/2001/04/xmlenc#') op SOAPBody (regel 453)",
+      "SoapHelper.hasEncryptedBody()": "PASS – body.getElementsByTagNameNS('http://www.w3.org/2001/04/xmlenc#', 'EncryptedData') → namespace exact gelijk",
+      "Namespace match": "PASS – XML_ENC_NS in SoapHelper = 'http://www.w3.org/2001/04/xmlenc#' (regel 33)"
+    },
+    "Test 1 (enc) – decrypt called, verify NEVER, decryptedSoap in DB en AMQP": {
+      "decrypt mock stub": "PASS – eq(encryptedSoap) matcher correct; decrypt() retourneert decryptedSoap",
+      "verify(cryptoServiceClient).decrypt(...)": "PASS",
+      "verify(cryptoServiceClient, never()).verify(any(), any())": "PASS – request heeft geen Signature (withSig=false)",
+      "entity.getRawSoapXml() == decryptedSoap": "PASS – OrchestratorService slaat processedSoap op na decrypt",
+      "inboundMsg.getRawSoapXml() == decryptedSoap": "PASS"
+    },
+    "Test 2 (sig) – verify called met originele rawSoap, decrypt NEVER, originele soap in DB": {
+      "CryptoServiceClient.verify() return type": "PASS – boolean (regel 88 CryptoServiceClient.java); thenReturn(true) compileert correct",
+      "hasEncryptedBody(request) = false": "PASS – withEnc=false → geen EncryptedData in body",
+      "verify met eq(signedSoap)": "PASS – processedSoap = rawSoap = signedSoap (geen decrypt), eq() matcht"
+    },
+    "Test 3 (enc+sig) – InOrder decrypt EERST dan verify MET decryptedSoap": {
+      "InOrder verificatie": "PASS – inOrder(cryptoServiceClient).verify(...decrypt...).verify(...verify...)",
+      "decryptedSoap heeft withSig=true withEnc=false": "PASS – buildSoapXml('msg-full-001', true, false, true)",
+      "verify stub gebruikt eq(decryptedSoap)": "PASS – processedSoap = decryptedSoap na decrypt-aanroep",
+      "entity.isAckRequested() = true": "PASS – header.getAckRequested() != null → buildEntity zet ackRequested=true",
+      "AMQP bevat decryptedSoap": "PASS",
+      "response.getSOAPBody().hasFault() = false": "PASS – soapHelper.createAck() retourneert faultloze ACK"
+    },
+    "Test 4 (plain) – verifyNoInteractions, DB aanwezig, AMQP gepubliceerd": {
+      "verifyNoInteractions(cryptoServiceClient)": "PASS – geen sig, geen enc → geen crypto-aanroepen",
+      "existsByMessageId = true": "PASS",
+      "inboundMsg != null": "PASS"
+    },
+    "Test 5 (invalid sig) – XmlSecurityException, existsByMessageId false": {
+      "verify throws XmlSecurityException": "PASS – aanroep vóór duplicate check en persist in OrchestratorService",
+      "existsByMessageId = false": "PASS – @Transactional rollback + entity nooit gepersisteerd"
+    },
+    "Test 6 (duplicate) – DuplicateMessageException bij tweede aanbieding": {
+      "eerste aanbieding slaagt": "PASS – plaintext, geen crypto nodig",
+      "tweede aanbieding gooit DuplicateMessageException": "PASS – existsByMessageId = true na eerste opslag"
+    },
+    "Test 7 (CPA blocked) – EbmsException, verifyNoInteractions, DB leeg": {
+      "CpaValidationResult.failure() bestaat": "PASS – statische factory methode aanwezig (CpaValidationResult.java regel 34)",
+      "EbmsException vóór crypto-aanroepen": "PASS – stap 1 in OrchestratorService, crypto is stap 2-3",
+      "verifyNoInteractions(cryptoServiceClient)": "PASS",
+      "existsByMessageId = false": "PASS"
+    },
+    "Test 8 (ACK) – SENT→DELIVERED, EbmsAckEvent op QUEUE_ACK": {
+      "buildSentOutboundEntity opgeslagen met status=SENT": "PASS – alle NOT NULL velden aanwezig (messageId, conversationId, cpaId, fromPartyId, toPartyId, service, action, timestamp)",
+      "entity.getStatus() = DELIVERED": "PASS – handleAcknowledgment update naar DELIVERED",
+      "ackEvent.getAckSenderPartyId() = TO_OIN": "PASS – service gebruikt entity.getToPartyId() = TO_OIN (regel 198 OrchestratorService)",
+      "ackEvent.getAcknowledgedAt() != null": "PASS – Instant.now() in service (regel 199)",
+      "QUEUE_ACK binding": "PASS – RabbitMqConfig bindt QUEUE_ACK aan EXCHANGE_EBMS met ROUTING_ACK"
+    },
+    "Test 9 (audit) – AuditEvent MESSAGE_RECEIVED, messageId en cpaId correct": {
+      "eventType = MESSAGE_RECEIVED": "PASS – OrchestratorService stap 7 (regel 136)",
+      "result = SUCCESS": "PASS",
+      "QUEUE_AUDIT gevuld": "PASS"
+    },
+    "Test 10 (unknown ACK) – assertThatCode geen exception": {
+      "assertThatCode import": "PASS – import static org.assertj.core.api.Assertions.* bevat assertThatCode",
+      "lambda () -> orchestratorService.handleAcknowledgment(...) compileert": "PASS – SOAPMessage return value stilzwijgend weggegooid; lambda past in ThrowingCallable",
+      "doesNotThrowAnyException()": "PASS – handleAcknowledgment logt alleen warn bij lege Optional, geen exception"
+    },
+    "buildHeader() ServiceType.builder().value(...)": {
+      "type niet gezet → null": "PASS – nullable; OrchestratorService gebruikt alleen getValue(), buildEntity() slaat value op in 'service'-kolom",
+      "SoapHelper null-guard op getType()": "PASS – if (header.getService().getType() != null) in buildOutboundSoap()"
+    },
+    "EbmsMessageEntity toPartyId nullable=false": {
+      "buildHeader() to-lijst altijd gevuld met TO_OIN": "PASS",
+      "buildEntity() header.getTo().isEmpty() ? null : get(0).getValue()": "PASS – nooit null omdat to-lijst altijd één element heeft"
+    }
+  },
+  "test_report_links": [
+    "/app/ebms-adapter/ebms-orchestrator/src/test/java/nl/logius/ebms/orchestrator/InboundPipelineIntegrationTest.java"
+  ],
+  "action_items": [
+    "LOW: Overweeg rawSoapXml toe te voegen aan buildSentOutboundEntity() in Test 8 (bijv. .rawSoapXml('<soap/>')) voor consistentie met productie-entiteiten, al is de kolom nullable.",
+    "LOW: Overweeg conversationId in buildSoapXml() te synchroniseren met de conversationId die aan buildHeader() wordt meegegeven, om testdata-inconsistentie te vermijden (heeft geen impact op testuitkomsten)."
+  ],
+  "critical_code_review_comments": [
+    "Geen compilatiefouten gevonden. Alle imports correct en volledig. @MockitoBean voor beide beans aanwezig. Namespace-correctheid buildSoapXml geverifieerd. verify() return type boolean bevestigd – thenReturn(true) compileert. Alle 10 test-scenario-assertions kloppen met de OrchestratorService implementatie."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "N/A"},
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteratie 4 statische review van InboundPipelineIntegrationTest.java afgerond. Geen kritieke of blockers gevonden. Bestand compileert en de test-logica klopt volledig met de OrchestratorService implementatie. Twee low-priority observaties: (1) rawSoapXml ontbreekt in buildSentOutboundEntity maar is nullable; (2) kleine conversationId-mismatch tussen SOAP XML en header DTO is functioneel onschadelijk. Vorige iteratie-bevindingen (SoapHelper actor namespace, dubbele stapnummering) blijven relevant als openstaande actiepunten voor E1."
+}
