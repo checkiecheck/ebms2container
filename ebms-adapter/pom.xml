@@ -270,12 +270,12 @@
                     <version>${maven-surefire-plugin.version}</version>
                     <configuration>
                         <!--
-                          @{argLine} wordt door JaCoCo's prepare-agent ingevuld met de javaagent flag.
-                          De --add-opens zijn nodig voor:
-                            - java.base/java.lang: Lombok + Spring reflection
-                            - java.base/java.lang.reflect: MapStruct + Spring proxies
-                            - java.base/java.security: Bouncy Castle KeyStore in tests
-                            - java.xml/com.sun.org.apache.xerces.internal.dom: Santuario XML-DSig
+                          @{argLine} wordt door JaCoCo prepare-agent ingevuld met de javaagent flag.
+                          De extra opties zijn nodig voor:
+                            java.base/java.lang         : Lombok + Spring reflection
+                            java.base/java.lang.reflect : MapStruct + Spring proxies
+                            java.base/java.security     : Bouncy Castle KeyStore in tests
+                            java.xml/xerces.internal.dom: Santuario XML-DSig
                         -->
                         <argLine>
                             @{argLine}
