@@ -90,7 +90,9 @@ public class XmlSigningService {
             transforms.addTransform(Canonicalizer.ALGO_ID_C14N_EXCL_OMIT_COMMENTS);
 
             // Onderteken het root-element (lege URI = geheel document)
-            signature.addDocument("", transforms, Constants.ALGO_ID_DIGEST_SHA256);
+            // SHA-256 digest URI: stabiele W3C-constante (vervangt Constants.ALGO_ID_DIGEST_SHA256
+            // dat vervallen is in Santuario 3.0.6)
+            signature.addDocument("", transforms, "http://www.w3.org/2001/04/xmlenc#sha256");
 
             // Voeg KeyInfo toe (certificaat voor verificatie)
             signature.addKeyInfo(cert);
@@ -190,7 +192,11 @@ public class XmlSigningService {
             Document doc = parseXml(xmlContent);
             Canonicalizer c14n = Canonicalizer.getInstance(
                 Canonicalizer.ALGO_ID_C14N_EXCL_OMIT_COMMENTS);
-            return c14n.canonicalizeSubtree(doc.getDocumentElement());
+            // Santuario 3.0.6: canonicalizeSubtree vereist nu een OutputStream-parameter
+            // (de variant die byte[] retourneert is vervallen)
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            c14n.canonicalizeSubtree(doc.getDocumentElement(), baos);
+            return baos.toByteArray();
         } catch (Exception e) {
             throw new XmlSecurityException("C14N-canonicalisatie mislukt: " + e.getMessage(), e);
         }
