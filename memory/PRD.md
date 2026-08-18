@@ -135,6 +135,13 @@ Bouwen van een moderne ebMS2 adapter conform:
 - [x] `OutboundMessageService.persistOutboundMessage()` – idempotente upsert toegevoegd:
   `findByMessageId().map(UPDATE).orElseGet(INSERT)` — lost unique-constraint fout op bij RabbitMQ retry (nack + requeue)
 
+#### Code-kwaliteitsfix (februari 2026)
+- [x] `CpaValidationService.java` – ontbrekende klasse-sluitaccolade `}` toegevoegd (EOF)
+- [x] `OrchestratorService.java` – ontbrekende `import nl.logius.ebms.common.model.amqp.EbmsAckEvent` toegevoegd; FQN-gebruik vervangen door korte klassenaam
+- [x] `cpa-service/application.yml` – `channel-by-party` toegevoegd aan `spring.cache.cache-names`
+- [x] `ebms-orchestrator/application.yml` – `cache-names: [outbound-channel]` sectie toegevoegd
+- [x] Alle 3 Dockerfiles – ENTRYPOINT in correcte exec-form (geen shell-variabele interpolatie)
+
 
   - osb-be (plaintext): geen crypto, persistentie en AMQP-publish geverifieerd
   - osb-be-s (signed): `CryptoServiceClient.verify()` aangeroepen, decrypt NIET

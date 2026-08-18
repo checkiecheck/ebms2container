@@ -134,3 +134,4 @@ public class CpaValidationService {
                 "cpa-service onbereikbaar voor kanaal-lookup: " + e.getMessage());
         }
     }
+}

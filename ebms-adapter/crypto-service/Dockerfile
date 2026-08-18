@@ -48,5 +48,4 @@ ENTRYPOINT ["java",                                  \
   "-XX:MaxRAMPercentage=75.0",                       \
   "-Djava.security.egd=file:/dev/./urandom",         \
   "-Dorg.apache.xml.security.ignoreLineBreaks=true", \
-  "-Dspring.profiles.active=${SPRING_PROFILES_ACTIVE:prod}", \
   "-jar", "/app/app.jar"]

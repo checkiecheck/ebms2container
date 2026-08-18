@@ -7,6 +7,7 @@ import nl.logius.ebms.common.exception.DuplicateMessageException;
 import nl.logius.ebms.common.exception.EbmsException;
 import nl.logius.ebms.common.model.amqp.AuditEvent;
 import nl.logius.ebms.common.model.amqp.EbmsInboundMessage;
+import nl.logius.ebms.common.model.amqp.EbmsAckEvent;
 import nl.logius.ebms.common.model.amqp.EbmsOutboundMessage;
 import nl.logius.ebms.common.model.ebxml.EbxmlMessageHeader;
 import nl.logius.ebms.orchestrator.config.RabbitMqConfig;
@@ -191,12 +192,12 @@ public class OrchestratorService {
                     rabbitTemplate.convertAndSend(
                         RabbitMqConfig.EXCHANGE_EBMS,
                         RabbitMqConfig.ROUTING_ACK,
-                        nl.logius.ebms.common.model.amqp.EbmsAckEvent.builder()
+                        EbmsAckEvent.builder()
                             .messageId(refToMessageId)
                             .conversationId(entity.getConversationId())
                             .cpaId(entity.getCpaId())
                             .ackSenderPartyId(entity.getToPartyId())
-                            .acknowledgedAt(java.time.Instant.now())
+                            .acknowledgedAt(Instant.now())
                             .build());
                     log.info("[ACK] Backoffice-notificatie gepubliceerd: messageId={}", refToMessageId);
                 } catch (Exception e) {

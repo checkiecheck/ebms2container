@@ -3,6 +3,8 @@ spring:
     name: ebms-orchestrator
   cache:
     type: caffeine
+    cache-names:
+      - outbound-channel
     caffeine:
       spec: maximumSize=500,expireAfterWrite=300s
 
