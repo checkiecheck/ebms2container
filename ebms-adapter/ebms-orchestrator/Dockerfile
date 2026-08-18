@@ -8,6 +8,10 @@
 FROM maven:3.9.9-eclipse-temurin-21-alpine AS build
 WORKDIR /workspace
 
+# Kopieer Maven-configuratie (.mvn/jvm.config, maven.config, wrapper)
+# Dit zorgt voor consistente --add-opens en build-opties in elke omgeving
+COPY .mvn                         .mvn
+
 # Kopieer alle POM-bestanden voor dependency-cache (Docker layer caching)
 COPY pom.xml                      pom.xml
 COPY ebms-common/pom.xml          ebms-common/pom.xml
@@ -18,15 +22,14 @@ COPY crypto-service/pom.xml       crypto-service/pom.xml
 # Warm de Maven dependency-cache op (wordt gecached zolang POM's ongewijzigd zijn)
 RUN mvn -pl ebms-orchestrator -am \
         dependency:go-offline \
-        -q --no-transfer-progress
+        -q
 
 # Kopieer broncode en bouw de module (plus transitieve afhankelijkheden)
 COPY ebms-common/src              ebms-common/src
 COPY ebms-orchestrator/src        ebms-orchestrator/src
 
 RUN mvn -pl ebms-orchestrator -am \
-        package -DskipTests \
-        --no-transfer-progress
+        package -DskipTests
 
 # ── Stage 2: JRE runtime ──────────────────────────────────────────────────────
 FROM eclipse-temurin:21-jre-alpine

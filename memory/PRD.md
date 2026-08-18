@@ -142,6 +142,18 @@ Bouwen van een moderne ebMS2 adapter conform:
 - [x] `ebms-orchestrator/application.yml` – `cache-names: [outbound-channel]` sectie toegevoegd
 - [x] Alle 3 Dockerfiles – ENTRYPOINT in correcte exec-form (geen shell-variabele interpolatie)
 
+#### Build-stabilisatie (februari 2026)
+- [x] CXF upgrade: `4.0.4` → `4.1.8` – Spring Boot 3.4 / Spring 6.2 aligned; lost JAXB-ContextFactory hard-ref op + httpclient5 versieconflict
+- [x] Santuario upgrade: `3.0.4` → `3.0.6` – bevat Java-21 module-toegang bug-fixes
+- [x] Expliciete versie-pinning toegevoegd aan `dependencyManagement`: `httpclient5:5.4.1`, `woodstox-core:7.1.1`, `jakarta.activation-api:2.1.3`
+- [x] `dependencyConvergence` enforcer-regel toegevoegd – faalt de build bij divergente transitive versies i.p.v. stille runtime crashes
+- [x] `lombok-mapstruct-binding:0.2.0` toegevoegd als annotation-processor – garandeert correcte Lombok→MapStruct verwerkingsvolgorde op Java 21
+- [x] Surefire `argLine` verbeterd: `@{argLine}` prefix (JaCoCo-compatibel) + extra `--add-opens` voor Santuario/Xerces/Bouncy Castle
+- [x] `.mvn/jvm.config` aangemaakt – JVM-flags actief bij elke lokale `mvn`-aanroep
+- [x] `.mvn/maven.config` aangemaakt – `--no-transfer-progress --batch-mode` voor alle builds
+- [x] `.mvn/wrapper/maven-wrapper.properties` aangemaakt – pinned op Maven 3.9.9
+- [x] Alle 3 Dockerfiles: `COPY .mvn .mvn` toegevoegd zodat config ook in Docker-build actief is
+
 
   - osb-be (plaintext): geen crypto, persistentie en AMQP-publish geverifieerd
   - osb-be-s (signed): `CryptoServiceClient.verify()` aangeroepen, decrypt NIET

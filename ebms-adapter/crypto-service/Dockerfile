@@ -8,6 +8,9 @@
 FROM maven:3.9.9-eclipse-temurin-21-alpine AS build
 WORKDIR /workspace
 
+# Kopieer Maven-configuratie (.mvn/jvm.config, maven.config, wrapper)
+COPY .mvn                         .mvn
+
 COPY pom.xml                      pom.xml
 COPY ebms-common/pom.xml          ebms-common/pom.xml
 COPY ebms-orchestrator/pom.xml    ebms-orchestrator/pom.xml
@@ -16,14 +19,13 @@ COPY crypto-service/pom.xml       crypto-service/pom.xml
 
 RUN mvn -pl crypto-service -am \
         dependency:go-offline \
-        -q --no-transfer-progress
+        -q
 
 COPY ebms-common/src              ebms-common/src
 COPY crypto-service/src           crypto-service/src
 
 RUN mvn -pl crypto-service -am \
-        package -DskipTests \
-        --no-transfer-progress
+        package -DskipTests
 
 # ── Stage 2: JRE runtime ──────────────────────────────────────────────────────
 FROM eclipse-temurin:21-jre-alpine

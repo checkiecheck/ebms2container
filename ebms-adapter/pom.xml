@@ -46,11 +46,14 @@
         <!-- Spring Boot -->
         <spring-boot.version>3.4.1</spring-boot.version>
 
-        <!-- Apache CXF (SOAP 1.1 / JAX-WS / MTOM) -->
-        <cxf.version>4.0.4</cxf.version>
+        <!-- Apache CXF (SOAP 1.1 / JAX-WS / MTOM)
+             4.1.x = Spring Boot 3.4 / Spring 6.2 / Jakarta EE 10 aligned
+             (4.0.x had JAXB-ContextFactory hard-ref + httpclient5 versieconflict) -->
+        <cxf.version>4.1.8</cxf.version>
 
-        <!-- XML Security: DSig + Enc + C14N -->
-        <santuario.version>3.0.4</santuario.version>
+        <!-- XML Security: DSig + Enc + C14N
+             3.0.6 bevat bug-fixes voor Java-21 module-toegang t.o.v. 3.0.4 -->
+        <santuario.version>3.0.6</santuario.version>
 
         <!-- Bouncy Castle (PKI / certificaatverwerking) -->
         <bouncy-castle.version>1.78.1</bouncy-castle.version>
@@ -61,6 +64,12 @@
 
         <!-- Testcontainers (versie wordt beheerd door Spring Boot BOM) -->
         <testcontainers.version>1.20.4</testcontainers.version>
+
+        <!-- Expliciete versie-pinning voor bekende transitieve conflicten -->
+        <!-- httpclient5: CXF vs Spring Boot moeten dezelfde versie gebruiken -->
+        <httpclient5.version>5.4.1</httpclient5.version>
+        <!-- Woodstox StAX: CXF en Jackson brengen soms verschillende versies -->
+        <woodstox.version>7.1.1</woodstox.version>
 
         <!-- Maven-plugins -->
         <maven-compiler-plugin.version>3.13.0</maven-compiler-plugin.version>
@@ -143,6 +152,26 @@
                 <version>${bouncy-castle.version}</version>
             </dependency>
 
+            <!-- ── Transitieve versie-pinning (voorkomt convergentiefouten) ─ -->
+            <!-- httpclient5: CXF 4.1.x en Spring Boot 3.4 moeten alignen   -->
+            <dependency>
+                <groupId>org.apache.httpcomponents.client5</groupId>
+                <artifactId>httpclient5</artifactId>
+                <version>${httpclient5.version}</version>
+            </dependency>
+            <!-- Woodstox StAX parser: Jackson + CXF brengen soms divergente versies -->
+            <dependency>
+                <groupId>com.fasterxml.woodstox</groupId>
+                <artifactId>woodstox-core</artifactId>
+                <version>${woodstox.version}</version>
+            </dependency>
+            <!-- Jakarta Activation API: CXF vs Spring Boot alignering      -->
+            <dependency>
+                <groupId>jakarta.activation</groupId>
+                <artifactId>jakarta.activation-api</artifactId>
+                <version>2.1.3</version>
+            </dependency>
+
             <!-- ── Lombok ───────────────────────────────────────────────── -->
             <dependency>
                 <groupId>org.projectlombok</groupId>
@@ -207,12 +236,24 @@
                     <configuration>
                         <release>21</release>
                         <parameters>true</parameters>
+                        <!-- Onderdrukt "release version 21 is not supported" waarschuwingen -->
+                        <compilerArgs>
+                            <arg>-Xlint:-options</arg>
+                        </compilerArgs>
                         <annotationProcessorPaths>
+                            <!-- 1. Lombok EERST: genereert de code die MapStruct leest -->
                             <path>
                                 <groupId>org.projectlombok</groupId>
                                 <artifactId>lombok</artifactId>
                                 <version>${lombok.version}</version>
                             </path>
+                            <!-- 2. Lombok-MapStruct brug: garandeert correcte verwerkingsvolgorde -->
+                            <path>
+                                <groupId>org.projectlombok</groupId>
+                                <artifactId>lombok-mapstruct-binding</artifactId>
+                                <version>0.2.0</version>
+                            </path>
+                            <!-- 3. MapStruct NA Lombok -->
                             <path>
                                 <groupId>org.mapstruct</groupId>
                                 <artifactId>mapstruct-processor</artifactId>
@@ -228,7 +269,21 @@
                     <artifactId>maven-surefire-plugin</artifactId>
                     <version>${maven-surefire-plugin.version}</version>
                     <configuration>
-                        <argLine>--add-opens java.base/java.lang=ALL-UNNAMED</argLine>
+                        <!--
+                          @{argLine} wordt door JaCoCo's prepare-agent ingevuld met de javaagent flag.
+                          De --add-opens zijn nodig voor:
+                            - java.base/java.lang: Lombok + Spring reflection
+                            - java.base/java.lang.reflect: MapStruct + Spring proxies
+                            - java.base/java.security: Bouncy Castle KeyStore in tests
+                            - java.xml/com.sun.org.apache.xerces.internal.dom: Santuario XML-DSig
+                        -->
+                        <argLine>
+                            @{argLine}
+                            --add-opens java.base/java.lang=ALL-UNNAMED
+                            --add-opens java.base/java.lang.reflect=ALL-UNNAMED
+                            --add-opens java.base/java.security=ALL-UNNAMED
+                            --add-opens java.xml/com.sun.org.apache.xerces.internal.dom=ALL-UNNAMED
+                        </argLine>
                     </configuration>
                 </plugin>
 
@@ -260,7 +315,7 @@
                     </executions>
                 </plugin>
 
-                <!-- Build-vereisten afdwingen (Java + Maven versie) -->
+                <!-- Build-vereisten afdwingen (Java + Maven versie + dependency convergence) -->
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-enforcer-plugin</artifactId>
@@ -279,6 +334,12 @@
                                     <requireMavenVersion>
                                         <version>[3.9,)</version>
                                     </requireMavenVersion>
+                                    <!--
+                                      Faalt de build als twee transitive paden
+                                      naar VERSCHILLENDE versies van dezelfde artifact leiden.
+                                      Dwingt expliciete versie-pinning af in dependencyManagement.
+                                    -->
+                                    <dependencyConvergence/>
                                 </rules>
                             </configuration>
                         </execution>
