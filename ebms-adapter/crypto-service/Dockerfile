@@ -36,7 +36,7 @@ RUN addgroup -S ebms && adduser -S ebms -G ebms
 # Maak een map aan voor de KeyStore (wordt als volume gemount)
 RUN mkdir -p /app/keystores && chown ebms:ebms /app/keystores
 
-COPY --from=build /workspace/crypto-service/target/*.jar app.jar
+COPY --from=build /workspace/crypto-service/target/*[!plain].jar app.jar
 RUN chown ebms:ebms app.jar
 
 USER ebms
