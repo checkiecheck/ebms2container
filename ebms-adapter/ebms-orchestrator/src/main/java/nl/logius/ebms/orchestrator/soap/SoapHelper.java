@@ -182,8 +182,8 @@ public class SoapHelper {
 
             addChild(mh, "Action", EBXML_MSG_NS, header.getAction());
 
-            // MessageInfo
-            SOAPElement mi = mh.addChildElement("MessageInfo", "eb", EBXML_MSG_NS);
+            // MessageData (ebMS2 spec §3.1.6: <eb:MessageData>)
+            SOAPElement mi = mh.addChildElement("MessageData", "eb", EBXML_MSG_NS);
             addChild(mi, "Timestamp", EBXML_MSG_NS, Instant.now().toString());
             addChild(mi, "MessageId", EBXML_MSG_NS,
                 header.getMessageInfo() != null && header.getMessageInfo().getMessageId() != null
@@ -228,8 +228,8 @@ public class SoapHelper {
             addChild(msgHeader, "Service", EBXML_MSG_NS, EBXML_PING_SERVICE);
             addChild(msgHeader, "Action",  EBXML_MSG_NS, "Acknowledgment");
 
-            // MessageInfo
-            SOAPElement msgInfo = msgHeader.addChildElement("MessageInfo", "eb", EBXML_MSG_NS);
+            // MessageData (ebMS2 spec §3.1.6: <eb:MessageData>)
+            SOAPElement msgInfo = msgHeader.addChildElement("MessageData", "eb", EBXML_MSG_NS);
             addChild(msgInfo, "Timestamp",      EBXML_MSG_NS, Instant.now().toString());
             addChild(msgInfo, "MessageId",      EBXML_MSG_NS,
                 UUID.randomUUID() + "@ebms-orchestrator");
@@ -334,7 +334,7 @@ public class SoapHelper {
     }
 
     private MessageInfo parseMessageInfo(Element messageHeader) {
-        Element mi = getChild(messageHeader, "MessageInfo");
+        Element mi = getChild(messageHeader, "MessageData");
         if (mi == null) return null;
         String ts = getChildText(mi, "Timestamp");
         return MessageInfo.builder()
