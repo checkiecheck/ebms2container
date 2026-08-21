@@ -243,6 +243,36 @@ Bouwen van een moderne ebMS2 adapter conform:
 ---
 
 
+### Release 1.0 MVP – Go-Live scope (voltooid – augustus 2026)
+
+Scope-akkoord met gebruiker: alleen Task 1 (outbound mTLS) + Task 2 (message monitoring UI).
+Reliable Messaging Acks, keystore-rotatie en zware audit-logging expliciet uitgesteld.
+
+#### Task 1 – Outbound mTLS Client (ebms-orchestrator)
+- [x] `soap/EbmsOutboundSSLProperties.java` – `@ConfigurationProperties(prefix="ebms.outbound.ssl")`:
+  keystore-path, keystore-password, truststore-path, truststore-password (env: KEYSTORE_PATH,
+  KEYSTORE_PASSWORD, TRUSTSTORE_PATH, TRUSTSTORE_PASSWORD)
+- [x] `soap/OutboundSoapClient.java` – constructor injecteert `EbmsOutboundSSLProperties` i.p.v.
+  losse `SSLContext`-bean; bouwt SSLContext via Apache HttpClient 5
+  `org.apache.hc.core5.ssl.SSLContexts.custom().loadKeyMaterial()/.loadTrustMaterial()`
+  - Graceful fallback: ontbrekende/lege keystore-config → warning-log + plain HTTP/HTTPS
+  - Bestaande CXF `HTTPConduit`/`TLSClientParameters`-injectie in `configureMtls()` ongewijzigd
+- [x] `pom.xml` – `httpclient5` dependency toegevoegd (versie via parent-BOM 5.4.1, geen conflict)
+- [x] `application.yml` – `ebms.outbound.ssl.*` block met env-var placeholders
+
+#### Task 2 – Basic Message Monitoring REST API + Admin UI
+- [x] `controller/MessageController.java` – `GET /api/admin/messages?page=&size=` (default size 50,
+  sort timestamp DESC), retourneert `Page<MessageDto>` via `EbmsMessageRepository.findAll(Pageable)`
+- [x] `dto/MessageDto.java` – read-only record (geen raw JPA-entity serialisatie)
+- [x] `static/admin/index.html` – vanilla JS + Tailwind CDN dashboard, bereikbaar op
+  `/admin/index.html`; tabel laatste 50 berichten, statuskleuren (groen/amber/rood/blauw),
+  details-modal met volledige payload-metadata + raw SOAP XML, auto-refresh 10s, paginering
+
+**Let op:** kon niet lokaal compileren/testen — deze sandbox heeft geen JDK/Maven geïnstalleerd
+(alleen bedoeld voor het voorbereiden van bestanden; build/deploy gebeurt via `deploy.sh` door de
+gebruiker). Code is grondig handmatig gereviewd op imports, method-signatures en package-conventies
+conform bestaande stijl (RestClientConfig, RetryProperties patterns).
+
 ### P0 – Fase 4: auditor-service (NIEUW)
 - [ ] Aparte Spring Boot microservice op poort 8083 voor append-only audit-events
 - [ ] Verwerkt `AuditEvent` AMQP-berichten van orchestrator en crypto-service

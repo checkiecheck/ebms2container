@@ -12,12 +12,14 @@ import org.apache.cxf.endpoint.Client;
 import org.apache.cxf.frontend.ClientProxy;
 import org.apache.cxf.transport.http.HTTPConduit;
 import org.apache.cxf.transports.http.configuration.HTTPClientPolicy;
-import org.springframework.beans.factory.annotation.Value;
+import org.apache.hc.core5.ssl.SSLContexts;
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Value;
 
 import javax.net.ssl.SSLContext;
 import javax.xml.namespace.QName;
 import java.io.ByteArrayInputStream;
+import java.io.File;
 import java.nio.charset.StandardCharsets;
 
 /**
@@ -49,20 +51,52 @@ public class OutboundSoapClient {
     @Value("${ebms.outbound.read-timeout-ms:30000}")
     private long readTimeoutMs;
 
-    /** Optionele mTLS SSLContext (injecteert PKIoverheid TLS-certificaat). */
+    /** Optionele mTLS SSLContext (PKIoverheid client-certificaat + truststore). */
     private final SSLContext mTlsSslContext;
 
     /**
-     * Constructor – SSLContext is optioneel; zonder mTLS wordt plain-HTTP gebruikt.
-     * In productie injecteer je een {@link SSLContext} via een
-     * {@code @Configuration}-klasse die het PKIoverheid-certificaat laadt.
+     * Bouwt de outbound mTLS {@link SSLContext} op basis van {@link EbmsOutboundSSLProperties}.
+     * Zonder geconfigureerde keystore/truststore valt de client terug op plain HTTP/HTTPS.
      */
-    public OutboundSoapClient(
-            @org.springframework.beans.factory.annotation.Autowired(required = false)
-            SSLContext mTlsSslContext) {
-        this.mTlsSslContext = mTlsSslContext;
-        if (mTlsSslContext == null) {
-            log.warn("[OUTBOUND] Geen mTLS SSLContext geconfigureerd – plain HTTP gebruikt");
+    public OutboundSoapClient(EbmsOutboundSSLProperties sslProperties) {
+        this.mTlsSslContext = buildSslContext(sslProperties);
+    }
+
+    /**
+     * Construeert de {@link SSLContext} via Apache HttpClient 5's {@code SSLContextBuilder}
+     * (laadt client-keystore + truststore). Bij een ontbrekende of ongeldige configuratie
+     * wordt {@code null} teruggegeven en gebruikt {@link #send} plain HTTP/HTTPS.
+     */
+    private SSLContext buildSslContext(EbmsOutboundSSLProperties props) {
+        String keystorePath       = props.getKeystorePath();
+        String keystorePassword   = props.getKeystorePassword();
+        String truststorePath     = props.getTruststorePath();
+        String truststorePassword = props.getTruststorePassword();
+
+        if (keystorePath == null || keystorePath.isBlank()
+                || keystorePassword == null || keystorePassword.isBlank()) {
+            log.warn("Outbound SSLContext not configured - falling back to plain HTTP/HTTPS");
+            return null;
+        }
+
+        try {
+            char[] keyPass = keystorePassword.toCharArray();
+            var sslContextBuilder = SSLContexts.custom()
+                .loadKeyMaterial(new File(keystorePath), keyPass, keyPass);
+
+            if (truststorePath != null && !truststorePath.isBlank()) {
+                char[] trustPass = truststorePassword != null
+                    ? truststorePassword.toCharArray() : new char[0];
+                sslContextBuilder.loadTrustMaterial(new File(truststorePath), trustPass);
+            }
+
+            SSLContext sslContext = sslContextBuilder.build();
+            log.info("[OUTBOUND] mTLS SSLContext opgebouwd (keystore={})", keystorePath);
+            return sslContext;
+        } catch (Exception e) {
+            log.warn("Outbound SSLContext not configured - falling back to plain HTTP/HTTPS: {}",
+                e.getMessage());
+            return null;
         }
     }
 

@@ -82,6 +82,11 @@ ebms:
     signing-key-alias: ${EBMS_SIGNING_KEY_ALIAS:signing-key}
     connect-timeout-ms: ${EBMS_CONNECT_TIMEOUT_MS:10000}
     read-timeout-ms: ${EBMS_READ_TIMEOUT_MS:30000}
+    ssl:
+      keystore-path: ${KEYSTORE_PATH:}
+      keystore-password: ${KEYSTORE_PASSWORD:}
+      truststore-path: ${TRUSTSTORE_PATH:}
+      truststore-password: ${TRUSTSTORE_PASSWORD:}
   inbound:
     decryption-key-alias: ${EBMS_DECRYPTION_KEY_ALIAS:encryption-key}
 
