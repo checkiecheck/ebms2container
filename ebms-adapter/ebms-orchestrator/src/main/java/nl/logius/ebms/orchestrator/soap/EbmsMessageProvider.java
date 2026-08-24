@@ -74,7 +74,7 @@ public class EbmsMessageProvider implements Provider<SOAPMessage> {
             }
 
             // Reguliere ebMS2-berichtverwerking
-            String rawSoap = soapHelper.soapToString(request);
+            String rawSoap = extractRawXmlPayload(request);
             return orchestratorService.processInboundMessage(request, header, rawSoap, clientOin);
 
         } catch (DuplicateMessageException e) {
@@ -85,6 +85,34 @@ public class EbmsMessageProvider implements Provider<SOAPMessage> {
             return soapHelper.createErrorResponse(
                 "Unknown", "Interne verwerkingsfout: " + e.getMessage(), null);
         }
+    }
+
+    // ── Rauwe payload-extractie ────────────────────────────────────────────
+
+    /**
+     * Haalt de ONBEWERKTE inkomende XML-payload op, vastgelegd door
+     * {@link RawPayloadCaptureInterceptor} vóórdat SAAJ/CXF het bericht parseerde.
+     *
+     * <p>Kritiek voor XML-DSig verificatie: {@code soapHelper.soapToString(request)} serialiseert
+     * het reeds geparseerde SAAJ-object opnieuw, wat een digest mismatch kan veroorzaken t.o.v.
+     * de bytes die de verzendende partij daadwerkelijk stuurde. Valt terug op
+     * {@code soapToString()} als de interceptor-property onverwacht ontbreekt.
+     */
+    private String extractRawXmlPayload(SOAPMessage request) {
+        try {
+            if (wsContext != null) {
+                Object raw = wsContext.getMessageContext()
+                    .get(RawPayloadCaptureInterceptor.RAW_XML_PAYLOAD);
+                if (raw instanceof String rawXml && !rawXml.isBlank()) {
+                    return rawXml;
+                }
+            }
+        } catch (Exception e) {
+            log.debug("Rauwe XML-payload niet beschikbaar in message context: {}", e.getMessage());
+        }
+        log.warn("[RAW-CAPTURE] Geen rauwe payload gevonden in message context - fallback naar "
+            + "soapToString() (kan XML-DSig verificatie beïnvloeden)");
+        return soapHelper.soapToString(request);
     }
 
     // ── OIN-extractie ─────────────────────────────────────────────────────

@@ -341,9 +341,26 @@ conform bestaande stijl (RestClientConfig, RetryProperties patterns).
   "Signature nooit direct onder Envelope"). `mvn test` → BUILD SUCCESS, 5/5 groen. Bevestigd:
   `Signature.parentNode` = SOAP Header (niet Envelope) voor SOAP-input; root-fallback ongewijzigd
   voor niet-SOAP XML. Geen `retest_needed`.
-- Optioneel (niet vereist, buiten scope van deze bugfix): overweeg de handtekening in een
-  `wsse:Security`-wrapper binnen de Header te plaatsen i.p.v. direct child van Header, indien het
-  Digikoppeling-profiel WS-Security-conventie vereist.
+### Fix: rauwe XML-capture voor XML-DSig verificatie (HAVEN v9 – augustus 2026)
+- **Root cause (bevestigd via crypto-service verify-logs, valid=false):** `EbmsMessageProvider`
+  bouwde `rawSoap` via `soapHelper.soapToString(request)` = `SOAPMessage.writeTo()` op het reeds
+  SAAJ-geparseerde object — een herserialisatie die de infoset kan wijzigen (whitespace/MIME-framing),
+  wat de C14N-gebaseerde digest bij XML-DSig verificatie liet mismatchen.
+- [x] `soap/RawPayloadCaptureInterceptor.java` (NIEUW) – CXF `AbstractPhaseInterceptor<Message>` op
+  `Phase.RECEIVE`; cachet de rauwe HTTP-body via `CachedOutputStream` vóór SAAJ-parsing, zet 'm op
+  `Exchange` (`RAW_XML_PAYLOAD`), en herstelt een verse leesbare `InputStream` voor de SOAP-parser.
+  Drie onafhankelijke try/catch-stages (cache/extract/reset) loggen WARN i.p.v. te falen (Fault) —
+  degradeert netjes naar de `soapToString()`-fallback. Charset volgt `Message.ENCODING`, met
+  UTF-8 fallback.
+- [x] `config/CxfEndpointConfig.java` – `endpoint.getInInterceptors().add(new RawPayloadCaptureInterceptor())`
+  vóór `publish("/ebms")`.
+- [x] `soap/EbmsMessageProvider.java` – nieuwe `extractRawXmlPayload()` leest
+  `wsContext.getMessageContext().get(RAW_XML_PAYLOAD)` i.p.v. rechtstreeks `soapToString()`; fallback
+  behouden. Ping/ACK-paden ongewijzigd (roepen deze methode niet aan).
+- **Testing_agent verificatie (geslaagd, 2 runs):** iteratie 11 – 4 nieuwe JUnit 5 tests, bytecode-
+  geverifieerd dat CXF 4.1.8's `WrappedMessageContext.get()` doorschakelt naar `Exchange.get()`
+  (Exchange→WebServiceContext-propagatie bevestigd, niet enkel aangenomen). Iteratie 12 (na hardening-
+  refactor) – 5/5 tests groen, incl. nieuwe IOException-degradatietest. Geen `retest_needed`.
 
 ### P0 – Fase 4: auditor-service (NIEUW)
 - [ ] Aparte Spring Boot microservice op poort 8083 voor append-only audit-events

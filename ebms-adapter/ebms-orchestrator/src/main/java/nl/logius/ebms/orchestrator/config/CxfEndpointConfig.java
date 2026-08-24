@@ -9,6 +9,7 @@ import org.springframework.context.annotation.Configuration;
 import nl.logius.ebms.orchestrator.service.OrchestratorService;
 import nl.logius.ebms.orchestrator.soap.EbmsMessageProvider;
 import nl.logius.ebms.orchestrator.soap.PingEchoService;
+import nl.logius.ebms.orchestrator.soap.RawPayloadCaptureInterceptor;
 import nl.logius.ebms.orchestrator.soap.SoapHelper;
 
 import jakarta.xml.ws.Endpoint;
@@ -47,6 +48,9 @@ public class CxfEndpointConfig {
     @Bean
     public Endpoint ebmsEndpoint(EbmsMessageProvider ebmsMessageProvider) {
         EndpointImpl endpoint = new EndpointImpl(cxfBus, ebmsMessageProvider);
+        // Legt de rauwe HTTP-body vast vóór SAAJ-parsing (zie RawPayloadCaptureInterceptor javadoc) —
+        // voorkomt digest-mismatches bij XML-DSig verificatie door SAAJ-herserialisatie.
+        endpoint.getInInterceptors().add(new RawPayloadCaptureInterceptor());
         endpoint.publish("/ebms");
         return endpoint;
     }
