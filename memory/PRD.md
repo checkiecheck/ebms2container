@@ -292,6 +292,23 @@ conform bestaande stijl (RestClientConfig, RetryProperties patterns).
   moet de gebruiker zelf `/api/cpa` proxyen naar `cpa-service:8081`, of de dashboard-fetch-URL
   aanpassen naar een absolute cpa-service-URL.
 
+#### Kong CPA-route toegevoegd (opgelost – augustus 2026)
+- [x] `helm/charts/ebms-orchestrator/templates/ingress.yaml` – extra path-regel per host:
+  `/api/cpa` (Prefix) → backend-service `cpa-service` i.p.v. de orchestrator-service, binnen
+  dezelfde Ingress (zelfde origin als het admin-dashboard, dus geen CORS nodig)
+  - `strip-path: "false"` (bestaande annotatie) behoudt het volledige pad, wat exact aansluit op
+    `CpaController`'s `@RequestMapping("/api/cpa")` — geen path-rewrite nodig
+- [x] `helm/values.yaml` – nieuw blok `ebms-orchestrator.ingress.cpaServiceRoute`:
+  `enabled`, `path: /api/cpa`, `pathType: Prefix`, `serviceName` (leeg = auto `<release>-cpa-service`),
+  `servicePort: 8081`
+- **Let op (pre-existing, niet gewijzigd):** `CPA_SERVICE_URL` default in values.yaml is
+  `http://cpa-service:8081`, maar cpa-service's Helm-fullname zonder `nameOverride` is
+  `<release-name>-cpa-service`. Dit is een bestaande naamgevings-mismatch los van deze taak; de
+  nieuwe ingress-route rekent daarom met `<release-name>-cpa-service` (override via
+  `cpaServiceRoute.serviceName` indien de release-naam afwijkt).
+- Kon niet valideren met `helm template` (geen helm/kubectl in deze sandbox) — YAML-indentatie en
+  Go-template `if`/`range`/`end`-balans handmatig gecontroleerd.
+
 ### P0 – Fase 4: auditor-service (NIEUW)
 - [ ] Aparte Spring Boot microservice op poort 8083 voor append-only audit-events
 - [ ] Verwerkt `AuditEvent` AMQP-berichten van orchestrator en crypto-service

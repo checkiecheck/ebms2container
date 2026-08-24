@@ -35,6 +35,19 @@ ebms-orchestrator:
         paths:
           - path: /soap/ebms
             pathType: Prefix
+    # Extra Kong-route op dezelfde host/ingress: stuurt /api/cpa door naar cpa-service
+    # zodat de admin-dashboard (static/admin/index.html, CPA Beheer-tab) op hetzelfde
+    # origin bij cpa-service kan (geen CORS nodig). strip-path=false (zie annotations
+    # hierboven) betekent dat het volledige pad "/api/cpa/..." behouden blijft, wat
+    # exact overeenkomt met CpaController's @RequestMapping("/api/cpa").
+    cpaServiceRoute:
+      enabled: true
+      path: /api/cpa
+      pathType: Prefix
+      # Leeg = automatisch afgeleid als "<release-name>-cpa-service" (Helm fullname
+      # van de cpa-service subchart zonder nameOverride). Override indien nodig.
+      serviceName: ""
+      servicePort: 8081
     tls:
       - secretName: ebms-tls-cert
         hosts:
