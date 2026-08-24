@@ -1,0 +1,36 @@
+{
+  "summary": "Backend-only verification of the application.yml fix that removes the hardcoded `hibernate.default_schema: public` in ebms-orchestrator, replacing it with a Spring placeholder `${SPRING_JPA_DEFAULT_SCHEMA:}` (empty default). Verified: (1) mvn compile of ebms-common+ebms-orchestrator SUCCESS. (2) YAML parses via Spring's YamlPropertiesFactoryBean (SnakeYAML). (3) A new JUnit test `ApplicationYamlSchemaPropertyTest` (4 tests, ALL PASS) asserts: raw YAML value equals the placeholder literal (no hardcoded 'public'); resolves to empty string when env var unset; resolves to override value when set. (4) Hibernate 6.6.4.Final bytecode-level analysis confirms an empty-string `hibernate.default_schema` is safely equivalent to unset (Identifier.toIdentifier returns null on empty via StringHelper.isEmpty guard) → NO malformed '.tablename' SQL possible; SQL will be unqualified and driven purely by the JDBC connection's search_path. (5) Repo-wide grep confirms no other hardcoded schema references remain outside the now-parameterized line.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/ebms-adapter/ebms-orchestrator/src/test/java/nl/logius/ebms/orchestrator/config/ApplicationYamlSchemaPropertyTest.java",
+    "/app/ebms-adapter/ebms-orchestrator/target/surefire-reports/TEST-nl.logius.ebms.orchestrator.config.ApplicationYamlSchemaPropertyTest.xml"
+  ],
+  "action_items": [
+    "None required for the code fix — it is correct and safe.",
+    "Optional: run a Testcontainers-backed integration test in CI (where Docker is available) that starts PG with two schemas (public + orchestrator) and asserts that inserting via JPA lands in the search_path schema, not in public. Not runnable in this sandbox (Docker unavailable — confirmed in iterations 10-13)."
+  ],
+  "critical_code_review_comments": [
+    "Fix is correct and generic. `default_schema: ${SPRING_JPA_DEFAULT_SCHEMA:}` uses Spring's placeholder syntax with empty default. HAVEN k3s deployment can override via env var if ever needed, but by default the JDBC url's `currentSchema=orchestrator` search_path parameter is authoritative.",
+    "SAFETY of empty string proven via Hibernate 6.6.4.Final bytecode (hibernate-core-6.6.4.Final.jar → org.hibernate.boot.model.naming.Identifier.toIdentifier(String,boolean,boolean)): first instruction is `StringHelper.isEmpty(input); ifeq → aconst_null; areturn`. An empty or null input yields a null Identifier, which in SqlStringGenerationContextImpl becomes a null `defaultSchema` field. `schemaWithDefault(null)` then returns the entity-declared schema (which is also null since @Table has no schema attribute), so the qualified name emits WITHOUT any schema prefix — Postgres then uses the connection's search_path. No risk of malformed '.ebms_message' identifier.",
+    "Spring Boot 3.4 note: an empty-string placeholder value IS passed through to Hibernate's property map as the empty string \"\" (not stripped), which is what the empty-check in Identifier.toIdentifier handles. Verified indirectly via the property-resolution test — the value resolves to \"\" (not null), and Hibernate handles both cases identically.",
+    "Regression grep clean: only the parameterized `default_schema: ${SPRING_JPA_DEFAULT_SCHEMA:}` line remains in orchestrator/cpa/crypto. EbmsMessageEntity's @Table has no schema attribute (already generic, unchanged as noted). cpa-service and crypto-service have no default_schema override at all.",
+    "Optional hardening (not required): consider adding a startup log line reporting the effective schema resolution — e.g., log `spring.jpa.properties.hibernate.default_schema` value at INFO on boot — this would make on-call diagnostics of any future 'wrong schema' incident trivial."
+  ],
+  "updated_files": [
+    "/app/ebms-adapter/ebms-orchestrator/src/test/java/nl/logius/ebms/orchestrator/config/ApplicationYamlSchemaPropertyTest.java (NEW - 4 unit tests)"
+  ],
+  "success_rate": {"backend": "100% (4/4 new tests pass, mvn compile SUCCESS)", "frontend": "N/A (skipped per request)"},
+  "test_credentials": "N/A",
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "JDK 21 at /tmp/jdk-21.0.2, Maven 3.9.9 at /tmp/apache-maven-3.9.9 (both may be lost on pod restart; download URLs recorded in prior iterations). Run new test: `export JAVA_HOME=/tmp/jdk-21.0.2 PATH=$JAVA_HOME/bin:/tmp/apache-maven-3.9.9/bin:$PATH && cd /app/ebms-adapter && mvn -pl ebms-orchestrator -am test -Dtest=ApplicationYamlSchemaPropertyTest -Dsurefire.failIfNoSpecifiedTests=false -o`. Docker/Testcontainers still NOT available in sandbox — do NOT try the *IntegrationTest classes here.",
+  "rca of the issue": {
+    "bug": "Two Postgres schemas (public.ebms_message with 2 stale PROCESSING rows, orchestrator.ebms_message with 4 correct DELIVERED rows) diverged because Hibernate was writing to `public` while Flyway followed the connection's search_path (`orchestrator`).",
+    "root_cause": "ebms-orchestrator/src/main/resources/application.yml previously hardcoded `spring.jpa.properties.hibernate.default_schema: public`. In Hibernate 6.x, an explicit default_schema value is baked into SqlStringGenerationContextImpl.defaultSchema (via Identifier.toIdentifier), which then prefixes EVERY generated CRUD/select SQL with `public.` — overriding whatever the JDBC connection's `currentSchema=orchestrator` parameter would otherwise imply through PG's search_path.",
+    "fix_verification": "Line changed to `default_schema: ${SPRING_JPA_DEFAULT_SCHEMA:}`. When the env var is unset (the production case), the value resolves to an empty string, which Hibernate's Identifier.toIdentifier() treats as null (verified via bytecode of StringHelper.isEmpty guard). Result: `defaultSchema` field is null → no schema prefix in generated SQL → Postgres resolves table names via search_path → writes land in `orchestrator.ebms_message` matching Flyway migrations. If a deployment ever needs an explicit override (e.g., multi-tenant), setting SPRING_JPA_DEFAULT_SCHEMA restores explicit behaviour — proven by the 4th unit test.",
+    "residual_risk": "Zero from the fix mechanism itself. Only residual gap is that no live-DB end-to-end test was run in this sandbox (Docker unavailable). Recommend CI runs a Testcontainers scenario with two schemas as belt-and-braces coverage.",
+    "mitigation": "Already applied by main agent; verified. User confirmed the 2 stale rows in public schema will be left as-is (no data migration in scope)."
+  }
+}

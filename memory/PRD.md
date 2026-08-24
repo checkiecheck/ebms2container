@@ -386,6 +386,27 @@ conform bestaande stijl (RestClientConfig, RetryProperties patterns).
   na rollback") is NIET end-to-end getest — enkel via Mockito + Spring's gedocumenteerde
   `setRollbackOnly()`-contract. Aanbevolen: CI met Docker draait dit end-to-end.
 
+### Fix: schema-mismatch tussen Hibernate en Flyway (augustus 2026)
+- **Root cause (gevonden door gebruiker via directe SQL-analyse):** twee schema's voor dezelfde
+  tabel — `orchestrator.ebms_message` (4 correcte DELIVERED-rijen, geschreven vóór/via Flyway, dat
+  de connectie's `currentSchema=orchestrator` search_path volgt) vs. `public.ebms_message` (2
+  verweesde PROCESSING-rijen). Oorzaak: `application.yml` had hardcoded
+  `hibernate.default_schema: public`, wat Hibernate dwingt élke SQL-query te prefixen met
+  `public.` — ONGEACHT de JDBC-connectie's `currentSchema`-parameter.
+- [x] `application.yml` – `hibernate.default_schema: public` → `${SPRING_JPA_DEFAULT_SCHEMA:}`
+  (leeg default = Hibernate qualificeert geen schema meer, volgt volledig de JDBC search_path;
+  optionele env-var override blijft mogelijk voor toekomstige multi-tenant-scenario's).
+- **Scope bevestigd generiek:** geen entity had al een hardcoded schema-attribuut;
+  cpa-service/crypto-service hadden nooit een `default_schema`-override — enkel deze ene regel
+  was het probleem.
+- **Gebruikerskeuze:** de 2 verweesde `PROCESSING`-rijen in `public.ebms_message` blijven bewust
+  onaangeroerd (geen data-migratie in scope).
+- **Testing_agent verificatie (geslaagd):** 4/4 nieuwe unit tests; YAML-parsing bevestigd; Hibernate
+  6.6.4.Final bytecode-analyse bevestigt dat een lege string voor `default_schema` door
+  `Identifier.toIdentifier()`/`StringHelper.isEmpty()` als `null` behandeld wordt — geen risico op
+  een malformed `.tablename`-identifier. Geen `retest_needed`. Restrisico: geen Docker/Testcontainers
+  in sandbox, dus geen live 2-schema Postgres-test uitgevoerd (aanbevolen in CI).
+
 ### P0 – Fase 4: auditor-service (NIEUW)
 - [ ] Aparte Spring Boot microservice op poort 8083 voor append-only audit-events
 - [ ] Verwerkt `AuditEvent` AMQP-berichten van orchestrator en crypto-service

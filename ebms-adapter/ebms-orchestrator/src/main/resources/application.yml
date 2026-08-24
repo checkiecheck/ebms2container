@@ -32,7 +32,10 @@ spring:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
         format_sql: false
-        default_schema: public
+        # Geen hardcoded schema: Hibernate laat het schema over aan de JDBC-connectie's
+        # search_path (currentSchema=... in SPRING_DATASOURCE_URL). Alleen indien een
+        # deployment ooit een expliciete override nodig heeft, kan dit via env var gezet worden.
+        default_schema: ${SPRING_JPA_DEFAULT_SCHEMA:}
 
   # ── Flyway ────────────────────────────────────────────────────────────────
   flyway:
