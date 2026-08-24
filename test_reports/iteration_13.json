@@ -1,0 +1,44 @@
+{
+  "summary": "Backend-only verification of the @Transactional-rollback fix in OutboundMessageService.handleOutboundMessage() plus the new @Version field on EbmsMessageEntity and Flyway V3 migration. Compilation clean; 4/4 focused Mockito unit tests PASS. Docker/Testcontainers NOT available in this sandbox, so the end-to-end 'DB row does not remain PROCESSING' assertion was verified indirectly (see rca) — see 'action_items'.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/ebms-adapter/ebms-orchestrator/src/test/java/nl/logius/ebms/orchestrator/service/OutboundMessageServiceRollbackTest.java",
+    "/app/ebms-adapter/ebms-orchestrator/target/surefire-reports/TEST-nl.logius.ebms.orchestrator.service.OutboundMessageServiceRollbackTest.xml"
+  ],
+  "action_items": [
+    "The end-to-end assertion 'after send() failure, the ebms_message row does NOT remain at PROCESSING' was verified INDIRECTLY (Mockito static-mock of TransactionAspectSupport asserting setRollbackOnly() is called before the method returns). Docker/Testcontainers is not available in the sandbox, so a real PostgreSQL rollback assertion was NOT executed. Recommend main agent (or CI) run OutboundPipelineIntegrationTest-style Testcontainers coverage in the CI environment where Docker IS available, extended with a 'send() throws → assert repo.findByMessageId is empty (or status != PROCESSING)' scenario.",
+    "Nothing to fix in production code — MessageController and MessageDto were re-audited and confirmed to contain zero hardcoding/fallback for status (page.map(MessageDto::from) → e.getStatus() direct)."
+  ],
+  "critical_code_review_comments": [
+    "Fix is correct: both catch blocks in OutboundMessageService.handleOutboundMessage() (EbmsException + generic Exception) now call TransactionAspectSupport.currentTransactionStatus().setRollbackOnly() BEFORE nack() — this is Spring's documented mechanism to force rollback when an exception is caught internally rather than propagated. Once setRollbackOnly() is invoked, the @Transactional interceptor will rollback (not commit) at method exit regardless of whether an exception propagates. This is a stable Spring contract, valid since Spring 2.x.",
+    "@Version Long field on EbmsMessageEntity is correct: standard JPA semantics for a nullable numeric wrapper @Version is that Hibernate treats null as 'unsaved' and initializes it (typically to 0) on first INSERT. The V3 Flyway migration additionally sets DB-level DEFAULT 0 as a safety net. Lombok @Builder + @NoArgsConstructor coexist safely — no @Builder.Default is needed because null → auto-assigned.",
+    "V3 migration uses ADD COLUMN IF NOT EXISTS which is idempotent (PostgreSQL 9.6+); safe with V1/V2 pre-existing schema. Not executed against a real DB in this run, but SQL is standard PG syntax.",
+    "MessageController.getMessages(): confirmed no hardcoding — pageable.map(MessageDto::from), status flows directly from entity → DTO. @Enumerated(EnumType.STRING) is present on status field. Both user-hypothesized bugs are indeed absent (as the user/main-agent already stated).",
+    "Minor enhancement (non-blocking): consider adding a @Query-based status update or @Modifying update in a dedicated FAILED-state transaction after the outer rollback — otherwise, on repeated redelivery failures the row disappears entirely until success. Currently the whole entity is rolled back so operators lose visibility on transient failures. Optional improvement, not required for the reported bug.",
+    "Minor: the outbound pipeline uses @Transactional on a @RabbitListener method that also calls amqpChannel.basicAck/basicNack. Note that AMQP ack/nack is NOT part of the DB transaction — this is expected/correct here (manual ack mode), but worth documenting so future maintainers don't try to enroll the channel into JTA."
+  ],
+  "updated_files": [
+    "/app/ebms-adapter/ebms-orchestrator/src/test/java/nl/logius/ebms/orchestrator/service/OutboundMessageServiceRollbackTest.java (NEW)"
+  ],
+  "success_rate": {"backend": "100% (4/4 unit tests pass, mvn compile SUCCESS on ebms-common + ebms-orchestrator)", "frontend": "N/A (skipped per request)"},
+  "test_credentials": "N/A",
+  "seed_data_creation": "None (pure Mockito unit tests, no DB)",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "JDK 21 at /tmp/jdk-21.0.2, Maven 3.9.9 at /tmp/apache-maven-3.9.9 — reuse via `export JAVA_HOME=/tmp/jdk-21.0.2 PATH=/tmp/jdk-21.0.2/bin:/tmp/apache-maven-3.9.9/bin:$PATH`. Docker/Testcontainers NOT available in the sandbox (previously confirmed across iteration_10/11/12). To run only the new tests: `mvn -pl ebms-orchestrator -am test -Dtest=OutboundMessageServiceRollbackTest -Dsurefire.failIfNoSpecifiedTests=false -o`. The existing Testcontainers-based tests (OutboundPipelineIntegrationTest, InboundPipelineIntegrationTest, OrchestratorServiceIntegrationTest) will silently be skipped or fail-to-start without Docker; do NOT try to run them here.",
+  "rca of the issue": {
+    "bug": "GET /api/admin/messages returned status=PROCESSING while the DB row eventually reached DELIVERED (or vice versa) after transient send failures.",
+    "root_cause": "OutboundMessageService.handleOutboundMessage() is @Transactional. Its try/catch swallowed downstream exceptions (from signing/encryption/soap-send) to call amqp nack() manually. Because the exception never propagated out of the method, Spring's @Transactional AOP proxy COMMITTED the transaction even though the pipeline had failed after persistOutboundMessage() had already saved status=PROCESSING. RabbitMQ then redelivered the message, but the earlier PROCESSING row was already committed — leading to a stale/incorrect state that the read API surfaced.",
+    "fix_verification": "Both catch blocks now invoke TransactionAspectSupport.currentTransactionStatus().setRollbackOnly() BEFORE nack(). Verified by 4 Mockito unit tests: (A) RuntimeException after persist → setRollbackOnly() called exactly once, only 1 save() (the initial PROCESSING), no final DELIVERED-save, nack(requeue=true), no ack. (B) EbmsException path → same. (C) Happy path → setRollbackOnly() never touched, 2 saves (PROCESSING then DELIVERED), ack sent, no nack. (D) EbmsMessageEntity builder without explicit version compiles/builds successfully with version=null pre-persist.",
+    "residual_risk": "Because Testcontainers/Docker is unavailable, a real 'after rollback, the row does not exist in PG' end-to-end assertion was NOT run in this sandbox. However, Spring's setRollbackOnly()+@Transactional rollback semantics is a well-established, deterministic contract; the unit test proves the fix wires the contract correctly. Suggest CI (with Docker) runs a Testcontainers equivalent for defense-in-depth.",
+    "mitigation": "Already applied by main agent. No further changes required."
+  }
+}

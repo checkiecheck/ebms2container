@@ -362,6 +362,30 @@ conform bestaande stijl (RestClientConfig, RetryProperties patterns).
   (Exchange→WebServiceContext-propagatie bevestigd, niet enkel aangenomen). Iteratie 12 (na hardening-
   refactor) – 5/5 tests groen, incl. nieuwe IOException-degradatietest. Geen `retest_needed`.
 
+### Fix: status-mismatch tussen DB en admin-API (augustus 2026)
+- **Gebruikers-hypothesen gecontroleerd en NIET de oorzaak (met bewijs):** `MessageController`/
+  `MessageDto` hebben geen hardcoded "PROCESSING" of null-fallback (`page.map(MessageDto::from)` →
+  `e.getStatus()` direct); `EbmsMessageEntity.status` had al `@Enumerated(EnumType.STRING)`.
+- **Werkelijke root cause (gevonden via code-analyse):** `OutboundMessageService.handleOutboundMessage()`
+  is `@Transactional`, maar de try/catch rond signing/encryptie/verzenden vangt exceptions ZELF af
+  (voor AMQP nack/requeue) zonder de exception te laten propageren. Spring's `@Transactional` rolt
+  alleen terug bij een propagerende exception — hier COMMIT de transactie dus alsnog, met de entity
+  stilletjes vast op `PROCESSING` (gezet vóór de fout), terwijl RabbitMQ het bericht requeue't.
+- [x] `OutboundMessageService.java` – beide catch-blocks roepen nu
+  `TransactionAspectSupport.currentTransactionStatus().setRollbackOnly()` vóór `nack()`, zodat een
+  mislukte verwerking de HELE transactie terugdraait (inclusief de eerdere PROCESSING-persist) i.p.v.
+  een verweesde rij achter te laten.
+- [x] `EbmsMessageEntity.java` – `@Version private Long version` toegevoegd (optimistic locking),
+  voorkomt lost-updates bij gelijktijdige verwerking van dezelfde messageId (RabbitMQ redelivery).
+- [x] `V3__add_message_version.sql` (NIEUW) – `ALTER TABLE ebms_message ADD COLUMN IF NOT EXISTS
+  version BIGINT NOT NULL DEFAULT 0`.
+- **Testing_agent verificatie (geslaagd):** 4/4 Mockito-tests groen (`OutboundMessageServiceRollbackTest`)
+  — bevestigt `setRollbackOnly()` wordt exact 1x aangeroepen bij falen (geen finale save), happy-path
+  ongewijzigd (2 saves, ack, geen rollback). **Restrisico (expliciet gemeld door testing_agent):** geen
+  Docker/Testcontainers beschikbaar in de sandbox, dus de DB-niveau assertie ("rij bestaat niet meer
+  na rollback") is NIET end-to-end getest — enkel via Mockito + Spring's gedocumenteerde
+  `setRollbackOnly()`-contract. Aanbevolen: CI met Docker draait dit end-to-end.
+
 ### P0 – Fase 4: auditor-service (NIEUW)
 - [ ] Aparte Spring Boot microservice op poort 8083 voor append-only audit-events
 - [ ] Verwerkt `AuditEvent` AMQP-berichten van orchestrator en crypto-service

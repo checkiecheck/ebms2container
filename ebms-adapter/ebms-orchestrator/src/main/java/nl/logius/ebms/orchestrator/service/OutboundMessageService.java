@@ -23,6 +23,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.interceptor.TransactionAspectSupport;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 
 import java.time.Instant;
@@ -151,10 +152,15 @@ public class OutboundMessageService {
         } catch (EbmsException e) {
             log.error("[OUTBOUND] EbmsException: messageId={} code={} msg={}",
                 messageId, e.getErrorCode(), e.getMessage());
+            // Rollback: zonder dit commit @Transactional de transactie alsnog (de exception wordt
+            // hier afgevangen, dus Spring ziet geen fout) en blijft de entity stilletjes op
+            // PROCESSING staan, ook al is de daadwerkelijke verzending nooit gelukt.
+            TransactionAspectSupport.currentTransactionStatus().setRollbackOnly();
             nack(amqpChannel, deliveryTag, true); // requeue voor retry
 
         } catch (Exception e) {
             log.error("[OUTBOUND] Onverwachte fout: messageId={}", messageId, e);
+            TransactionAspectSupport.currentTransactionStatus().setRollbackOnly();
             nack(amqpChannel, deliveryTag, true); // requeue voor retry
         }
     }

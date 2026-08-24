@@ -82,6 +82,15 @@ public class EbmsMessageEntity {
     @Builder.Default
     private MessageStatus status = MessageStatus.RECEIVED;
 
+    /**
+     * Optimistic-locking versie. Voorkomt lost-updates wanneer een bericht (bijv. door een
+     * RabbitMQ-redelivery) gelijktijdig door twee transacties wordt bijgewerkt — zonder deze
+     * check kan een oudere status (bijv. PROCESSING) een nieuwere (bijv. DELIVERED) overschrijven.
+     */
+    @Version
+    @Column(name = "version", nullable = false)
+    private Long version;
+
     @Column(name = "timestamp", nullable = false)
     private Instant timestamp;
 
