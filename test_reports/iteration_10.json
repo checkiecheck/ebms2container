@@ -1,0 +1,35 @@
+{
+  "summary": "Verified the XmlSigningService SOAP-Header-aware append fix in /app/ebms-adapter/crypto-service. Downloaded OpenJDK 21.0.2 (aarch64) to /tmp and Apache Maven 3.9.9 to /tmp (project requires JDK 21 + Maven >=3.9; Debian's apt only had OpenJDK 17 and Maven 3.8.7 which failed the maven-enforcer-plugin rules). Authored a new focused JUnit 5 + Mockito unit test (XmlSigningServiceTest) with 5 cases covering SOAP 1.1, SOAP 1.2, literal-tag fallback, non-SOAP root fallback (regression), and an anti-regression assertion that Signature is NEVER a direct child of Envelope. Ran `mvn -pl ebms-common,crypto-service -am test -Dtest=XmlSigningServiceTest -Dsurefire.failIfNoSpecifiedTests=false` — BUILD SUCCESS, Tests run: 5, Failures: 0, Errors: 0, Skipped: 0 in 5.894 s. Bug fix confirmed working: after sign(), the <ds:Signature> element's parentNode is the SOAP <Header> element (both SOAP 1.1 and SOAP 1.2 namespaces), and for non-SOAP XML the Signature is still appended to doc.getDocumentElement() as before.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "XmlSigningService.sign()", "issue": "Literal-tag fallback branches (getElementsByTagName('soapenv:Header') / 'SOAP-ENV:Header') are effectively unreachable in the normal namespace-aware parse path used by parseXml() because a properly namespaced Envelope will already have matched one of the two namespace-URI lookups. They only trigger for pathological SOAP-ish XML whose Envelope carries a non-standard namespace URI while still using the literal soapenv:/SOAP-ENV: prefix (as covered by the sign_shouldAppendSignatureToLiteralSoapenvHeader_whenNoNamespace test). Not a bug, but consider a code comment clarifying intent."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/ebms-adapter/crypto-service/src/test/java/nl/logius/ebms/crypto/service/XmlSigningServiceTest.java",
+    "/app/ebms-adapter/crypto-service/target/surefire-reports/"
+  ],
+  "action_items": [
+    "None required for the reported bug — fix is verified and passes 5 targeted assertions including SOAP 1.1, SOAP 1.2, literal-prefix fallback, non-SOAP regression, and anti-regression 'never under Envelope'.",
+    "Optional: add a small javadoc note on sign() clarifying that the literal-tag fallbacks are defensive-only (namespace lookups will normally succeed first).",
+    "Optional follow-up (out of scope of this bug): consider also inserting the Signature in the WS-Security-standard location — inside a <wsse:Security> element under the SOAP Header — rather than as a direct child of <soapenv:Header>. Direct child of Header is schema-legal but WS-Security compliance typically requires a wsse:Security wrapper with mustUnderstand semantics. Confirm this matches the Digikoppeling ebMS2 profile expectations before shipping."
+  ],
+  "critical_code_review_comments": [
+    "XmlSigningService.sign() implementation matches the requested contract exactly: parse → try SOAP 1.1 NS Header → SOAP 1.2 NS Header → literal soapenv:Header → literal SOAP-ENV:Header → fallback doc.getDocumentElement(); signatureParent.appendChild(signature.getElement()) is used unchanged; still uses Apache Santuario XMLSignature (not javax.xml.crypto.dsig).",
+    "The new `import org.w3c.dom.Node` is used correctly (signatureParent declared as Node so both Element root and Header can be assigned).",
+    "verify() was NOT changed and continues to locate Signature via getElementsByTagNameNS(SignatureSpecNS, 'Signature'), which correctly finds the Signature wherever it lives (Envelope OR Header) — so round-trip sign→verify inside the same service is unaffected.",
+    "Regression check on the two existing Testcontainers-based tests (CryptoServiceApplicationTests, CryptoAuditLogRepositoryIntegrationTest) was NOT executed because Docker is not available in this sandbox; but those tests exercise Spring context wiring + Postgres audit persistence and are structurally unrelated to the DOM-append change, so regression risk is low."
+  ],
+  "updated_files": [
+    "/app/ebms-adapter/crypto-service/src/test/java/nl/logius/ebms/crypto/service/XmlSigningServiceTest.java (NEW — 5 JUnit 5 tests, Mockito for KeyStoreService/CryptoAuditLogRepository, BouncyCastle for ephemeral self-signed RSA cert)"
+  ],
+  "success_rate": {"backend": "100% (5/5 targeted tests pass)", "frontend": "N/A (skipped per request)"},
+  "test_credentials": "N/A — unit test generates an ephemeral in-memory RSA 2048 keypair + BC self-signed cert per test; no external keystore or DB used.",
+  "seed_data_creation": "None (unit test only).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Environment prep: this sandbox does NOT ship with JDK/Maven. To rerun: (1) apt-get install -y maven (needs replacing with 3.9+; system pkg is 3.8.7 which fails maven-enforcer-plugin); the maven 3.9.9 tarball was downloaded to /tmp/apache-maven-3.9.9 during this run — that path is ephemeral per pod-restart policy, re-download from https://archive.apache.org/dist/maven/maven-3/3.9.9/binaries/apache-maven-3.9.9-bin.tar.gz. (2) JDK 21 also not in apt; downloaded https://download.java.net/java/GA/jdk21.0.2/f2283984656d49d69e91c558476027ac/13/GPL/openjdk-21.0.2_linux-aarch64_bin.tar.gz into /tmp/jdk-21.0.2 (also ephemeral). (3) Run: `export JAVA_HOME=/tmp/jdk-21.0.2 PATH=$JAVA_HOME/bin:/tmp/apache-maven-3.9.9/bin:$PATH && cd /app/ebms-adapter && mvn -pl ebms-common,crypto-service -am test -Dtest=XmlSigningServiceTest -Dsurefire.failIfNoSpecifiedTests=false`. Docker is unavailable so Testcontainers-based tests (CryptoServiceApplicationTests, CryptoAuditLogRepositoryIntegrationTest) cannot be run here; they must be executed in a CI environment with a Docker daemon or an external Postgres.",
+  "rca of the issue": "Original bug: XmlSigningService.sign() appended the enveloped XMLSignature directly under doc.getDocumentElement(), which for SOAP envelopes is <soapenv:Envelope>. Per SOAP schema, <Envelope> only permits <Header> and <Body> as children; a foreign <ds:Signature> child causes SAAJ/Apache CXF at the receiver to reject or silently strip the signature, so the receiving orchestrator perceived the message as unsigned. Fix (verified): locate the SOAP Header via a 4-tier lookup (SOAP 1.1 NS → SOAP 1.2 NS → literal 'soapenv:Header' → literal 'SOAP-ENV:Header') and use that as the append-parent; keep doc.getDocumentElement() as the safe fallback for non-SOAP XML. Reproduction pre-fix would have shown Signature.parentNode = Envelope in the test; post-fix (validated) shows Signature.parentNode = Header (localName='Header', namespaceURI = SOAP 1.1/1.2 URI) for SOAP inputs and = documentElement for plain XML."
+}

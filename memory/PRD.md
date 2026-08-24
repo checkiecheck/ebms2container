@@ -320,6 +320,31 @@ conform bestaande stijl (RestClientConfig, RetryProperties patterns).
   berichten teruggeeft — verwijdert elke ambiguïteit over de "alle berichten"-garantie
 - JS-syntax herverifieerd via `node --check` na de partyName-fix
 
+### v9-deployment fixes (HAVEN k3s) – augustus 2026
+- [x] `XmlSigningService.sign()` (crypto-service) – SOAP-aware handtekening-parent: zoekt eerst
+  `soapenv:Header`/`SOAP-ENV:Header` (SOAP 1.1 + 1.2 namespaces + prefix-fallbacks) en plaatst
+  `<ds:Signature>` daar i.p.v. direct onder `soapenv:Envelope` (root). Root blijft fallback voor
+  niet-SOAP XML. Lost schema-violation op waardoor SAAJ/CXF de handtekening bij ontvangst
+  stilletjes verwierp.
+- [x] `helm/values.yaml` – `/admin` en `/api/admin` toegevoegd aan
+  `ebms-orchestrator.ingress.hosts[0].paths` (admin-dashboard + REST-API bereikbaar via Kong)
+- [x] `deployment-guide-haven-openshift.md` (NIEUW, project-root) – keystore Secret-volume
+  correctie (i.p.v. lege PVC), Kong route-tabel (`/soap/ebms`, `/admin`, `/api/admin`, `/api/cpa`),
+  E2E-validatiestappen voor outbound signing + inbound verificatie + mTLS
+- **Niet opgelost (bewust, buiten scope – alleen gedocumenteerd):** de Helm-charts van
+  `crypto-service`/`ebms-orchestrator` mounten nog steeds de lege PVC i.p.v. een Secret-volume voor
+  de keystore. Zie backlog "Keystore Secret-volume Helm-fix".
+- Kon niet compileren (geen JDK/Maven in sandbox) — testing_agent ingeschakeld voor verificatie.
+- **Testing_agent verificatie (geslaagd):** JDK 21 + Maven 3.9.9 gedownload in sandbox; nieuwe
+  `crypto-service/src/test/java/nl/logius/ebms/crypto/service/XmlSigningServiceTest.java` (5 JUnit 5
+  tests: SOAP 1.1, SOAP 1.2, literal-tag fallback, non-SOAP root-fallback regressie, anti-regressie
+  "Signature nooit direct onder Envelope"). `mvn test` → BUILD SUCCESS, 5/5 groen. Bevestigd:
+  `Signature.parentNode` = SOAP Header (niet Envelope) voor SOAP-input; root-fallback ongewijzigd
+  voor niet-SOAP XML. Geen `retest_needed`.
+- Optioneel (niet vereist, buiten scope van deze bugfix): overweeg de handtekening in een
+  `wsse:Security`-wrapper binnen de Header te plaatsen i.p.v. direct child van Header, indien het
+  Digikoppeling-profiel WS-Security-conventie vereist.
+
 ### P0 – Fase 4: auditor-service (NIEUW)
 - [ ] Aparte Spring Boot microservice op poort 8083 voor append-only audit-events
 - [ ] Verwerkt `AuditEvent` AMQP-berichten van orchestrator en crypto-service

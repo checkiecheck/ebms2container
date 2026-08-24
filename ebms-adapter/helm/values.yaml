@@ -35,6 +35,10 @@ ebms-orchestrator:
         paths:
           - path: /soap/ebms
             pathType: Prefix
+          - path: /admin
+            pathType: Prefix
+          - path: /api/admin
+            pathType: Prefix
     # Extra Kong-route op dezelfde host/ingress: stuurt /api/cpa door naar cpa-service
     # zodat de admin-dashboard (static/admin/index.html, CPA Beheer-tab) op hetzelfde
     # origin bij cpa-service kan (geen CORS nodig). strip-path=false (zie annotations

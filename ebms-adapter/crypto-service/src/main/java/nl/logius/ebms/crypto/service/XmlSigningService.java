@@ -13,6 +13,7 @@ import org.apache.xml.security.utils.Constants;
 import org.springframework.stereotype.Service;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
+import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 
 import javax.xml.parsers.DocumentBuilder;
@@ -74,15 +75,41 @@ public class XmlSigningService {
         try {
             Document doc = parseXml(xmlContent);
 
+            // ── SOAP-aware handtekening-parent bepalen ─────────────────────
+            // Enveloped signature ONDER het root-element (soapenv:Envelope) is een
+            // schema-violation (Envelope mag alleen Header + Body als children hebben),
+            // waardoor SAAJ/CXF de handtekening bij ontvangst stilletjes verwerpt.
+            // Zoek daarom eerst de SOAP Header en gebruik die als parent; val terug op
+            // het root-element voor niet-SOAP XML.
+            Node signatureParent = doc.getDocumentElement(); // Default fallback naar root
+
+            NodeList headers = doc.getElementsByTagNameNS(
+                "http://schemas.xmlsoap.org/soap/envelope/", "Header");
+            if (headers.getLength() == 0) {
+                headers = doc.getElementsByTagNameNS(
+                    "http://www.w3.org/2003/05/soap-envelope", "Header");
+            }
+            if (headers.getLength() == 0) {
+                headers = doc.getElementsByTagName("soapenv:Header");
+            }
+            if (headers.getLength() == 0) {
+                headers = doc.getElementsByTagName("SOAP-ENV:Header");
+            }
+
+            if (headers.getLength() > 0) {
+                signatureParent = headers.item(0);
+                log.debug("[XML-SIGN] SOAP Header gevonden - handtekening wordt toegevoegd aan de SOAP Header");
+            }
+
             PrivateKey     privateKey = keyStoreService.getPrivateKey(keyAlias);
             X509Certificate cert      = keyStoreService.getCertificate(keyAlias);
 
             // Bepaal algoritme op basis van sleuteltype
             String sigAlgo = determineSignatureAlgorithm(cert);
 
-            // Maak XMLSignature aan (enveloped)
+            // Maak XMLSignature aan (enveloped) en voeg toe aan de bepaalde parent
             XMLSignature signature = new XMLSignature(doc, "", sigAlgo);
-            doc.getDocumentElement().appendChild(signature.getElement());
+            signatureParent.appendChild(signature.getElement());
 
             // Voeg transforms toe: enveloped signature + exclusive C14N
             Transforms transforms = new Transforms(doc);
