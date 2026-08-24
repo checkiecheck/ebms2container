@@ -1,7 +1,10 @@
 package nl.logius.ebms.orchestrator.repository;
 
 import nl.logius.ebms.orchestrator.entity.EbmsMessageEntity;
+import nl.logius.ebms.orchestrator.entity.MessageDirection;
 import nl.logius.ebms.orchestrator.entity.MessageStatus;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -26,6 +29,9 @@ public interface EbmsMessageRepository extends JpaRepository<EbmsMessageEntity, 
     List<EbmsMessageEntity> findByConversationId(String conversationId);
 
     List<EbmsMessageEntity> findByStatus(MessageStatus status);
+
+    /** Admin message-monitor: optioneel filteren op richting (INBOUND/OUTBOUND). */
+    Page<EbmsMessageEntity> findByDirection(MessageDirection direction, Pageable pageable);
 
     /** Berichten die opnieuw geprobeerd moeten worden (rm-profielen). */
     @Query("""

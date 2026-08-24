@@ -304,7 +304,7 @@
 
       const partyEls = Array.from(doc.getElementsByTagNameNS('*', 'PartyInfo'));
       const parties = partyEls.map((p) => {
-        const name = p.getAttribute('partyName') || p.getAttribute('PartyName') || '(onbekende partij)';
+        const name = p.getAttribute('tp:partyName') || p.getAttribute('partyName') || p.getAttribute('PartyName') || '(onbekende partij)';
         const partyIdEl = p.getElementsByTagNameNS('*', 'PartyId')[0];
         const oin = partyIdEl ? partyIdEl.textContent.trim() : '(geen OIN)';
         const oinType = partyIdEl ? (partyIdEl.getAttribute('type') || '') : '';

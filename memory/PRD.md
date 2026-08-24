@@ -309,6 +309,17 @@ conform bestaande stijl (RestClientConfig, RetryProperties patterns).
 - Kon niet valideren met `helm template` (geen helm/kubectl in deze sandbox) — YAML-indentatie en
   Go-template `if`/`range`/`end`-balans handmatig gecontroleerd.
 
+#### Bugfixes na live-test in HAVEN k3s v8 (opgelost – augustus 2026)
+- [x] `static/admin/index.html` – `partyName` werd niet gevonden omdat het een ATTRIBUUT is op
+  `<tp:PartyInfo>` (bv. `tp:partyName="..."`), geen child-element. Fix: leest nu eerst
+  `getAttribute("tp:partyName")`, dan `"partyName"`, dan `"PartyName"` (fallback-keten behouden)
+- [x] `controller/MessageController.java` + `repository/EbmsMessageRepository.java` – bestaande
+  `findAll(pageable)` had géén richting-filter (dus toonde al INBOUND+OUTBOUND); expliciet gemaakt
+  door een optionele `?direction=INBOUND|OUTBOUND` query-param toe te voegen
+  (`EbmsMessageRepository.findByDirection`) terwijl het endpoint zonder param nog steeds ALLE
+  berichten teruggeeft — verwijdert elke ambiguïteit over de "alle berichten"-garantie
+- JS-syntax herverifieerd via `node --check` na de partyName-fix
+
 ### P0 – Fase 4: auditor-service (NIEUW)
 - [ ] Aparte Spring Boot microservice op poort 8083 voor append-only audit-events
 - [ ] Verwerkt `AuditEvent` AMQP-berichten van orchestrator en crypto-service
