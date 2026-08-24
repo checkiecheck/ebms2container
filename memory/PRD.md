@@ -273,6 +273,25 @@ Reliable Messaging Acks, keystore-rotatie en zware audit-logging expliciet uitge
 gebruiker). Code is grondig handmatig gereviewd op imports, method-signatures en package-conventies
 conform bestaande stijl (RestClientConfig, RetryProperties patterns).
 
+#### Task 2 uitbreiding – CPA Beheer tab (voltooid – augustus 2026)
+- [x] `static/admin/index.html` – tab-navigatie toegevoegd (Berichten / CPA Beheer), single file
+- [x] Drag-and-drop CPA XML upload-zone + bestaande-CPA zoekfunctie (`GET /api/cpa/{cpaId}`)
+- [x] Browser-side `DOMParser` parsing (namespace-agnostisch: `getElementsByTagNameNS('*', ...)`)
+  van cpaid, Status, Start/End, PartyInfo (naam + PartyId/OIN + Endpoint + certificaatdetectie)
+- [x] Visuele netwerk-kaart: partij-kaarten met OIN, endpoint-badge en certificaat-badge,
+  verbonden met een "ebMS 2.0"-lijn
+- [x] JS-syntax gevalideerd via `node --check`; HTML-tags balans gecontroleerd
+- **Afwijking van opdracht (bewust, na code-inspectie):** `cpa-service`'s `POST /api/cpa` accepteert
+  alléén JSON `CpaDto` (`cpaId`, `cpaXml`, `status`, `startDate`, `endDate`) — geen raw
+  `Content-Type: application/xml`-body. De dashboard-JS parsed de XML client-side en verzendt het
+  resultaat als JSON naar `/api/cpa`; dit is de enige manier waarop de upload met de bestaande
+  backend werkt. Geen backend-wijzigingen nodig.
+- **Bekende infra-aanname (niet opgelost, buiten scope):** de Helm-ingress van `ebms-orchestrator`
+  routeert alleen `/soap/ebms`; er is geen Kong-route naar `cpa-service` op `/api/cpa` in het huidige
+  chart. Als de orchestrator en cpa-service los van elkaar draaien zonder gedeelde ingress-route,
+  moet de gebruiker zelf `/api/cpa` proxyen naar `cpa-service:8081`, of de dashboard-fetch-URL
+  aanpassen naar een absolute cpa-service-URL.
+
 ### P0 – Fase 4: auditor-service (NIEUW)
 - [ ] Aparte Spring Boot microservice op poort 8083 voor append-only audit-events
 - [ ] Verwerkt `AuditEvent` AMQP-berichten van orchestrator en crypto-service

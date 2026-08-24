@@ -2,32 +2,45 @@
 <html lang="nl">
 <head>
 <meta charset="UTF-8" />
-<title>ebms-orchestrator | Message Monitor</title>
+<title>ebms-orchestrator | Admin</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <script src="https://cdn.tailwindcss.com"></script>
 <style>
   body { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   ::-webkit-scrollbar { width: 8px; height: 8px; }
   ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+  .dropzone-active { border-color: #34d399 !important; background-color: rgba(16,185,129,0.08); }
 </style>
 </head>
 <body class="bg-slate-950 text-slate-200 min-h-screen">
 
   <header class="border-b border-slate-800 bg-slate-900/60 px-6 py-4 flex items-center justify-between">
     <div>
-      <h1 class="text-lg font-semibold text-slate-100">ebms-orchestrator <span class="text-emerald-400">/ Message Monitor</span></h1>
-      <p class="text-xs text-slate-500 mt-0.5">Digikoppeling ebMS2 · Reliable Messaging status overview</p>
+      <h1 class="text-lg font-semibold text-slate-100">ebms-orchestrator <span class="text-emerald-400">/ Admin</span></h1>
+      <p class="text-xs text-slate-500 mt-0.5">Digikoppeling ebMS2 · monitoring &amp; CPA-beheer</p>
     </div>
-    <div class="flex items-center gap-3 text-xs">
-      <span id="autoRefreshLabel" class="text-slate-500">auto-refresh 10s</span>
+    <nav class="flex items-center gap-2 text-sm">
+      <button id="tabBerichtenBtn" data-testid="tab-berichten-button"
+        class="px-4 py-2 rounded-md bg-emerald-600 text-slate-950 font-medium transition-colors">
+        Berichten
+      </button>
+      <button id="tabCpaBtn" data-testid="tab-cpa-button"
+        class="px-4 py-2 rounded-md text-slate-300 hover:bg-slate-800 transition-colors">
+        CPA Beheer
+      </button>
+    </nav>
+  </header>
+
+  <!-- ══════════════════════════ TAB 1: BERICHTEN ══════════════════════════ -->
+  <main id="tabBerichten" class="p-6 max-w-7xl mx-auto">
+    <div class="flex items-center justify-end mb-3 gap-3 text-xs">
+      <span class="text-slate-500">auto-refresh 10s</span>
       <button id="refreshBtn" data-testid="refresh-button"
         class="px-3 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-medium transition-colors">
         Refresh
       </button>
     </div>
-  </header>
 
-  <main class="p-6 max-w-7xl mx-auto">
     <div class="rounded-lg border border-slate-800 overflow-hidden">
       <table class="w-full text-sm">
         <thead class="bg-slate-900 text-slate-400 text-xs uppercase tracking-wide">
@@ -62,7 +75,61 @@
     </div>
   </main>
 
-  <!-- Details modal -->
+  <!-- ══════════════════════════ TAB 2: CPA BEHEER ═════════════════════════ -->
+  <main id="tabCpa" class="hidden p-6 max-w-7xl mx-auto space-y-6">
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <!-- Upload card -->
+      <div class="rounded-lg border border-slate-800 bg-slate-900/40 p-5">
+        <h2 class="font-semibold text-slate-100 mb-3">CPA XML uploaden</h2>
+        <div id="dropzone" data-testid="cpa-dropzone"
+          class="border-2 border-dashed border-slate-700 rounded-lg p-10 text-center cursor-pointer transition-colors hover:border-emerald-500/60">
+          <p class="text-slate-400 text-sm">Sleep een CPA XML-bestand hierheen</p>
+          <p class="text-slate-600 text-xs mt-1">of klik om te bladeren</p>
+          <input id="fileInput" data-testid="cpa-file-input" type="file" accept=".xml,text/xml,application/xml" class="hidden" />
+        </div>
+
+        <div class="mt-4 flex items-center gap-2">
+          <div class="flex-1 h-px bg-slate-800"></div>
+          <span class="text-xs text-slate-600">of haal bestaande CPA op</span>
+          <div class="flex-1 h-px bg-slate-800"></div>
+        </div>
+        <div class="mt-3 flex gap-2">
+          <input id="cpaSearchInput" data-testid="cpa-search-input" type="text" placeholder="CPA ID..."
+            class="flex-1 bg-slate-950 border border-slate-700 rounded-md px-3 py-2 text-sm placeholder-slate-600 focus:outline-none focus:border-emerald-500" />
+          <button id="cpaFetchBtn" data-testid="cpa-fetch-button"
+            class="px-4 py-2 rounded-md border border-slate-700 hover:bg-slate-800 text-sm transition-colors">
+            Ophalen
+          </button>
+        </div>
+
+        <button id="cpaUploadBtn" data-testid="cpa-upload-button" disabled
+          class="mt-4 w-full px-4 py-2 rounded-md bg-emerald-600 hover:bg-emerald-500 disabled:opacity-30 disabled:cursor-not-allowed text-slate-950 font-medium transition-colors">
+          Upload naar CPA-service
+        </button>
+
+        <div id="cpaUploadStatus" data-testid="cpa-upload-status" class="mt-3 text-sm"></div>
+      </div>
+
+      <!-- CPA metadata card -->
+      <div class="rounded-lg border border-slate-800 bg-slate-900/40 p-5">
+        <h2 class="font-semibold text-slate-100 mb-3">CPA-details</h2>
+        <div id="cpaMeta" data-testid="cpa-meta" class="text-sm text-slate-500">
+          Nog geen CPA geladen — upload een bestand of zoek op CPA ID.
+        </div>
+      </div>
+    </div>
+
+    <!-- Visual network map -->
+    <div class="rounded-lg border border-slate-800 bg-slate-900/40 p-6">
+      <h2 class="font-semibold text-slate-100 mb-4">Netwerk-visualisatie</h2>
+      <div id="cpaNetworkMap" data-testid="cpa-network-map" class="text-sm text-slate-600">
+        Geen partijen om te tonen.
+      </div>
+    </div>
+  </main>
+
+  <!-- Details modal (berichten) -->
   <div id="detailsModal" data-testid="details-modal" class="hidden fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-6 z-50">
     <div class="bg-slate-900 border border-slate-700 rounded-lg max-w-3xl w-full max-h-[85vh] overflow-y-auto">
       <div class="flex items-center justify-between px-5 py-4 border-b border-slate-800 sticky top-0 bg-slate-900">
@@ -74,19 +141,39 @@
   </div>
 
   <script>
+    // ═══════════════════════════ Tabs ═══════════════════════════════════════
+    const tabBerichtenBtn = document.getElementById('tabBerichtenBtn');
+    const tabCpaBtn = document.getElementById('tabCpaBtn');
+    const tabBerichten = document.getElementById('tabBerichten');
+    const tabCpa = document.getElementById('tabCpa');
+
+    function activateTab(name) {
+      const berichtenActive = name === 'berichten';
+      tabBerichten.classList.toggle('hidden', !berichtenActive);
+      tabCpa.classList.toggle('hidden', berichtenActive);
+      tabBerichtenBtn.className = berichtenActive
+        ? 'px-4 py-2 rounded-md bg-emerald-600 text-slate-950 font-medium transition-colors'
+        : 'px-4 py-2 rounded-md text-slate-300 hover:bg-slate-800 transition-colors';
+      tabCpaBtn.className = !berichtenActive
+        ? 'px-4 py-2 rounded-md bg-emerald-600 text-slate-950 font-medium transition-colors'
+        : 'px-4 py-2 rounded-md text-slate-300 hover:bg-slate-800 transition-colors';
+    }
+    tabBerichtenBtn.onclick = () => activateTab('berichten');
+    tabCpaBtn.onclick = () => activateTab('cpa');
+
+    // ═══════════════════════════ Tab 1: Berichten ════════════════════════════
     const API_URL = '/api/admin/messages';
     const PAGE_SIZE = 50;
     let currentPage = 0;
     let currentData = [];
-    let refreshTimer = null;
 
     const statusBadge = (status) => {
       const map = {
         DELIVERED:   'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
         ACKNOWLEDGED:'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
+        RECEIVED:    'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
         SENT:        'bg-amber-500/15 text-amber-400 border-amber-500/30',
         PROCESSING:  'bg-amber-500/15 text-amber-400 border-amber-500/30',
-        RECEIVED:    'bg-sky-500/15 text-sky-400 border-sky-500/30',
         FAILED:      'bg-red-500/15 text-red-400 border-red-500/30',
         DUPLICATE:   'bg-red-500/15 text-red-400 border-red-500/30',
       };
@@ -188,7 +275,210 @@
     document.getElementById('nextBtn').onclick = () => loadMessages(currentPage + 1);
 
     loadMessages(0);
-    refreshTimer = setInterval(() => loadMessages(currentPage), 10000);
+    setInterval(() => {
+      if (!tabBerichten.classList.contains('hidden')) loadMessages(currentPage);
+    }, 10000);
+
+    // ═══════════════════════════ Tab 2: CPA Beheer ═══════════════════════════
+    const CPA_API_URL = '/api/cpa';
+    let lastParsedCpa = null;
+    let lastRawXml = null;
+
+    /** Namespace-agnostige CPA XML-parser (OASIS ebXML CPPA v2.0 / Digikoppeling). */
+    function parseCpaXml(xmlString) {
+      const doc = new DOMParser().parseFromString(xmlString, 'application/xml');
+      if (doc.getElementsByTagName('parsererror').length > 0) {
+        throw new Error('Ongeldige CPA XML - kon niet parsen');
+      }
+
+      const root = doc.documentElement;
+      const cpaId = root.getAttribute('cpaid') || root.getAttribute('cpaId') || '(onbekend)';
+
+      const statusEl = doc.getElementsByTagNameNS('*', 'Status')[0];
+      const status = statusEl ? (statusEl.getAttribute('value') || statusEl.textContent.trim()) : 'onbekend';
+
+      const startEl = doc.getElementsByTagNameNS('*', 'Start')[0];
+      const endEl   = doc.getElementsByTagNameNS('*', 'End')[0];
+      const startDate = startEl ? startEl.textContent.trim() : null;
+      const endDate   = endEl ? endEl.textContent.trim() : null;
+
+      const partyEls = Array.from(doc.getElementsByTagNameNS('*', 'PartyInfo'));
+      const parties = partyEls.map((p) => {
+        const name = p.getAttribute('partyName') || p.getAttribute('PartyName') || '(onbekende partij)';
+        const partyIdEl = p.getElementsByTagNameNS('*', 'PartyId')[0];
+        const oin = partyIdEl ? partyIdEl.textContent.trim() : '(geen OIN)';
+        const oinType = partyIdEl ? (partyIdEl.getAttribute('type') || '') : '';
+        const endpointEl = p.getElementsByTagNameNS('*', 'Endpoint')[0];
+        const endpoint = endpointEl
+          ? (endpointEl.getAttribute('uri') || endpointEl.textContent.trim())
+          : null;
+        const hasCertificate =
+          p.getElementsByTagNameNS('*', 'Certificate').length > 0 ||
+          p.getElementsByTagNameNS('*', 'X509Certificate').length > 0;
+        return { name, oin, oinType, endpoint, hasCertificate };
+      });
+
+      return { cpaId, status, startDate, endDate, parties };
+    }
+
+    function mapStatusToBackend(xmlStatus) {
+      const s = (xmlStatus || '').toLowerCase();
+      if (s.includes('revok') || s.includes('inactive')) return 'REVOKED';
+      if (s.includes('deprecat') || s.includes('pending')) return 'DEPRECATED';
+      return 'ACTIVE';
+    }
+
+    function toIsoOrNull(dateStr) {
+      if (!dateStr) return null;
+      const d = new Date(dateStr);
+      return isNaN(d.getTime()) ? null : d.toISOString();
+    }
+
+    function renderCpaMeta(parsed) {
+      document.getElementById('cpaMeta').innerHTML = `
+        <dl class="grid grid-cols-2 gap-2">
+          <dt class="text-slate-500">CPA ID</dt><dd class="text-slate-200 break-all" data-testid="cpa-meta-id">${parsed.cpaId}</dd>
+          <dt class="text-slate-500">Status</dt><dd class="text-slate-200">${parsed.status}</dd>
+          <dt class="text-slate-500">Start</dt><dd class="text-slate-200">${parsed.startDate || '-'}</dd>
+          <dt class="text-slate-500">Eind</dt><dd class="text-slate-200">${parsed.endDate || '-'}</dd>
+          <dt class="text-slate-500">Partijen</dt><dd class="text-slate-200">${parsed.parties.length}</dd>
+        </dl>
+      `;
+    }
+
+    function partyNode(party, idx) {
+      return `
+        <div data-testid="cpa-party-node-${idx}" class="flex-1 min-w-[220px] rounded-lg border border-slate-700 bg-slate-950/60 p-4">
+          <p class="text-slate-100 font-medium truncate" title="${party.name}">${party.name}</p>
+          <p class="text-xs text-slate-500 mt-1">OIN${party.oinType ? ' (' + party.oinType + ')' : ''}</p>
+          <p class="text-sm text-emerald-400 break-all">${party.oin}</p>
+          <div class="flex flex-wrap gap-1.5 mt-3">
+            <span class="px-2 py-0.5 rounded border text-xs ${party.hasCertificate
+              ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+              : 'bg-slate-500/15 text-slate-500 border-slate-500/30'}">
+              ${party.hasCertificate ? 'Certificaat OK' : 'Certificaat n.v.t.'}
+            </span>
+            ${party.endpoint ? `<span class="px-2 py-0.5 rounded border text-xs bg-sky-500/15 text-sky-400 border-sky-500/30 truncate max-w-[220px]" title="${party.endpoint}">${party.endpoint}</span>` : ''}
+          </div>
+        </div>
+      `;
+    }
+
+    function renderNetworkMap(parsed) {
+      const container = document.getElementById('cpaNetworkMap');
+      if (!parsed.parties.length) {
+        container.innerHTML = '<p class="text-slate-600">Geen partijen gevonden in deze CPA.</p>';
+        return;
+      }
+      const [sender, ...receivers] = parsed.parties;
+      const targets = receivers.length ? receivers : [sender];
+
+      container.innerHTML = `
+        <div class="flex flex-col gap-6">
+          ${targets.map((receiver, idx) => `
+            <div class="flex items-center gap-4 flex-wrap">
+              ${partyNode(sender, 'sender-' + idx)}
+              <div class="flex flex-col items-center px-2">
+                <span class="text-xs text-slate-500">ebMS 2.0</span>
+                <div class="flex items-center text-emerald-500">
+                  <span class="w-8 h-px bg-emerald-500/60"></span>
+                  <span class="mx-1">➔</span>
+                  <span class="w-8 h-px bg-emerald-500/60"></span>
+                </div>
+              </div>
+              ${partyNode(receiver, 'receiver-' + idx)}
+            </div>
+          `).join('')}
+        </div>
+      `;
+    }
+
+    function setUploadStatus(message, type) {
+      const el = document.getElementById('cpaUploadStatus');
+      const colors = { success: 'text-emerald-400', error: 'text-red-400', info: 'text-slate-500' };
+      el.className = `mt-3 text-sm ${colors[type] || 'text-slate-500'}`;
+      el.textContent = message;
+    }
+
+    function handleCpaFile(file) {
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const xmlText = reader.result;
+          const parsed = parseCpaXml(xmlText);
+          lastParsedCpa = parsed;
+          lastRawXml = xmlText;
+          renderCpaMeta(parsed);
+          renderNetworkMap(parsed);
+          document.getElementById('cpaUploadBtn').disabled = false;
+          setUploadStatus(`CPA-bestand geladen: ${parsed.cpaId} (${parsed.parties.length} partijen) — klik "Upload naar CPA-service" om te bevestigen.`, 'info');
+        } catch (err) {
+          setUploadStatus(`Fout bij parsen: ${err.message}`, 'error');
+          document.getElementById('cpaUploadBtn').disabled = true;
+        }
+      };
+      reader.onerror = () => setUploadStatus('Kon bestand niet lezen', 'error');
+      reader.readAsText(file);
+    }
+
+    const dropzone = document.getElementById('dropzone');
+    const fileInput = document.getElementById('fileInput');
+    dropzone.onclick = () => fileInput.click();
+    fileInput.onchange = (e) => handleCpaFile(e.target.files[0]);
+    ['dragenter', 'dragover'].forEach((evt) =>
+      dropzone.addEventListener(evt, (e) => { e.preventDefault(); dropzone.classList.add('dropzone-active'); }));
+    ['dragleave', 'drop'].forEach((evt) =>
+      dropzone.addEventListener(evt, (e) => { e.preventDefault(); dropzone.classList.remove('dropzone-active'); }));
+    dropzone.addEventListener('drop', (e) => handleCpaFile(e.dataTransfer.files[0]));
+
+    document.getElementById('cpaUploadBtn').onclick = async () => {
+      if (!lastParsedCpa || !lastRawXml) return;
+      setUploadStatus('Uploaden...', 'info');
+      try {
+        // NB: cpa-service accepteert JSON (CpaDto), geen raw XML content-type.
+        const payload = {
+          cpaId: lastParsedCpa.cpaId,
+          status: mapStatusToBackend(lastParsedCpa.status),
+          startDate: toIsoOrNull(lastParsedCpa.startDate),
+          endDate: toIsoOrNull(lastParsedCpa.endDate),
+          cpaXml: lastRawXml,
+        };
+        const res = await fetch(CPA_API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(`HTTP ${res.status}: ${text || res.statusText}`);
+        }
+        const saved = await res.json();
+        setUploadStatus(`CPA succesvol opgeslagen (cpaId=${saved.cpaId})`, 'success');
+      } catch (err) {
+        setUploadStatus(`Upload mislukt: ${err.message}`, 'error');
+      }
+    };
+
+    document.getElementById('cpaFetchBtn').onclick = async () => {
+      const cpaId = document.getElementById('cpaSearchInput').value.trim();
+      if (!cpaId) return;
+      setUploadStatus('Ophalen...', 'info');
+      try {
+        const res = await fetch(`${CPA_API_URL}/${encodeURIComponent(cpaId)}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const dto = await res.json();
+        const parsed = parseCpaXml(dto.cpaXml);
+        lastParsedCpa = parsed;
+        lastRawXml = dto.cpaXml;
+        renderCpaMeta(parsed);
+        renderNetworkMap(parsed);
+        document.getElementById('cpaUploadBtn').disabled = false;
+        setUploadStatus(`CPA ${cpaId} geladen uit cpa-service.`, 'success');
+      } catch (err) {
+        setUploadStatus(`Ophalen mislukt: ${err.message}`, 'error');
+      }
+    };
   </script>
 </body>
 </html>
