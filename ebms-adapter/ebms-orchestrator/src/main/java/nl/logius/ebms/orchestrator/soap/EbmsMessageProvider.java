@@ -7,6 +7,7 @@ import jakarta.xml.ws.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import nl.logius.ebms.common.exception.DuplicateMessageException;
+import nl.logius.ebms.common.exception.EbmsException;
 import nl.logius.ebms.common.model.ebxml.EbxmlMessageHeader;
 import nl.logius.ebms.orchestrator.service.OrchestratorService;
 import jakarta.xml.ws.handler.*;
@@ -80,6 +81,10 @@ public class EbmsMessageProvider implements Provider<SOAPMessage> {
         } catch (DuplicateMessageException e) {
             log.warn("[DUPLICATE] {}", e.getMessage());
             return soapHelper.createErrorResponse("DuplicateElimination", e.getMessage(), null);
+        } catch (EbmsException e) {
+            log.error("[SECURITY] Bericht afgewezen: errorCode={} msg={} clientOin={}",
+                e.getErrorCode(), e.getMessage(), clientOin);
+            return soapHelper.createErrorResponse(e.getErrorCode(), e.getMessage(), null);
         } catch (Exception e) {
             log.error("Fout bij verwerking ebMS2 bericht (clientOin={})", clientOin, e);
             return soapHelper.createErrorResponse(

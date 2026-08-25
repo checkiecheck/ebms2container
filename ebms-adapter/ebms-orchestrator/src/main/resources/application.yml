@@ -92,6 +92,15 @@ ebms:
       truststore-password: ${TRUSTSTORE_PASSWORD:}
   inbound:
     decryption-key-alias: ${EBMS_DECRYPTION_KEY_ALIAS:encryption-key}
+  security:
+    # Anti-spoofing: X-Forwarded-Client-OIN (gateway-mTLS) moet overeenkomen met eb:From/PartyId.
+    # true  = bericht afwijzen (SecurityFailure) bij mismatch of ontbrekende header (fail-closed)
+    # false = alleen waarschuwen bij ontbrekende header (bijv. lokale ontwikkeling zonder gateway)
+    enforce-inbound-oin-validation: ${EBMS_ENFORCE_INBOUND_OIN_VALIDATION:true}
+  watchdog:
+    # Reconciliator: markeert berichten die langer dan deze timeout vaststaan op PROCESSING als FAILED
+    stuck-processing-timeout-minutes: ${EBMS_WATCHDOG_TIMEOUT_MINUTES:5}
+    check-interval-ms: ${EBMS_WATCHDOG_CHECK_INTERVAL_MS:300000}
 
 # ── Actuator / health ─────────────────────────────────────────────────────────
 management:

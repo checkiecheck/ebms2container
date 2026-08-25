@@ -53,6 +53,9 @@ public class OrchestratorService {
     @Value("${ebms.inbound.decryption-key-alias:encryption-key}")
     private String decryptionKeyAlias;
 
+    @Value("${ebms.security.enforce-inbound-oin-validation:true}")
+    private boolean enforceInboundOinValidation;
+
     // ── Inbound message processing ────────────────────────────────────────
 
     /**
@@ -77,6 +80,10 @@ public class OrchestratorService {
             messageId, cpaId,
             header.getFrom().isEmpty() ? "?" : header.getFrom().get(0).getValue(),
             header.getAction());
+
+        // 0. Anti-spoofing: gateway-geverifieerd OIN (X-Forwarded-Client-OIN) moet overeenkomen
+        //    met het door de partij zelf opgegeven eb:From/PartyId (voorkomt identiteitspoofing).
+        validateInboundOin(header, clientOin, messageId, cpaId, rawSoap);
 
         // 1. CPA-validatie via cpa-service (fail-closed)
         CpaValidationResult cpaResult = cpaValidationService.validateCpaAndOin(cpaId, clientOin);
@@ -272,6 +279,80 @@ public class OrchestratorService {
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────
+
+    /**
+     * Anti-spoofing OIN-validatie (Task: Inbound OIN Validation / Gateway-integratie).
+     *
+     * <p>De ingress-gateway (Kong/mTLS-terminator) zet het cliëntcertificaat-OIN op de
+     * {@code X-Forwarded-Client-OIN} header. Dit is de enige door de infrastructuur
+     * geverifieerde identiteit. Deze methode controleert dat die identiteit overeenkomt met
+     * het door de afzender zelf opgegeven {@code eb:From}/{@code PartyId} in de SOAP-header –
+     * zonder deze check zou een partij zich als een andere partij kunnen voordoen puur door
+     * een ander PartyId in de XML te zetten.
+     *
+     * <p>Gedrag bij ontbrekende header wordt bepaald door
+     * {@code ebms.security.enforce-inbound-oin-validation} (standaard {@code true}):
+     * <ul>
+     *   <li>{@code true}  – bericht wordt afgewezen (fail-closed, aanbevolen in productie)</li>
+     *   <li>{@code false} – alleen een waarschuwing gelogd, verwerking gaat door (bijv. voor
+     *       omgevingen zonder mTLS-gateway, zoals lokale ontwikkeling)</li>
+     * </ul>
+     *
+     * @throws EbmsException met errorCode {@code SecurityFailure} bij een mismatch of
+     *                        ontbrekende header (indien enforced)
+     */
+    private void validateInboundOin(EbxmlMessageHeader header, String clientOin,
+                                     String messageId, String cpaId, String rawSoap) {
+        String fromPartyId = header.getFrom() != null && !header.getFrom().isEmpty()
+            ? header.getFrom().get(0).getValue() : null;
+
+        if (clientOin == null || clientOin.isBlank()) {
+            if (enforceInboundOinValidation) {
+                rejectSecurityFailure(header, messageId, cpaId, clientOin, rawSoap,
+                    "X-Forwarded-Client-OIN header ontbreekt (verplicht conform "
+                        + "ebms.security.enforce-inbound-oin-validation=true)");
+            } else {
+                log.warn("[OIN-ANTISPOOF] X-Forwarded-Client-OIN ontbreekt (enforce=false, "
+                    + "verwerking gaat door): messageId={}", messageId);
+            }
+            return;
+        }
+
+        if (fromPartyId == null || !clientOin.equals(fromPartyId)) {
+            rejectSecurityFailure(header, messageId, cpaId, clientOin, rawSoap,
+                "Gateway-geverifieerd OIN (" + clientOin + ") komt niet overeen met eb:From/PartyId ("
+                    + fromPartyId + ") - mogelijke identiteitspoofing");
+        }
+    }
+
+    /**
+     * Persisteert het bericht als {@code FAILED} (indien nog niet aanwezig), publiceert een
+     * {@code MESSAGE_REJECTED} audit-event en gooit een {@link EbmsException} met errorCode
+     * {@code SecurityFailure}, die door {@code EbmsMessageProvider} vertaald wordt naar een
+     * ebXML SOAP Fault.
+     */
+    private void rejectSecurityFailure(EbxmlMessageHeader header, String messageId, String cpaId,
+                                        String clientOin, String rawSoap, String reason) {
+        log.error("[OIN-ANTISPOOF] Bericht afgewezen: messageId={} reden={}", messageId, reason);
+
+        if (!messageRepository.existsByMessageId(messageId)) {
+            EbmsMessageEntity failedEntity = buildEntity(header, rawSoap, clientOin);
+            failedEntity.setStatus(MessageStatus.FAILED);
+            failedEntity.setErrorMessage(reason);
+            messageRepository.save(failedEntity);
+        }
+
+        publishAudit(AuditEvent.builder()
+            .eventType("MESSAGE_REJECTED")
+            .messageId(messageId)
+            .cpaId(cpaId)
+            .partyId(clientOin)
+            .result("FAILURE")
+            .errorDetail(reason)
+            .build());
+
+        throw new EbmsException("SecurityFailure", reason);
+    }
 
     private EbmsMessageEntity buildEntity(EbxmlMessageHeader header,
                                            String rawSoap,

@@ -125,6 +125,10 @@ public class EbmsMessageEntity {
     @Column(name = "raw_soap_xml", columnDefinition = "TEXT")
     private String rawSoapXml;
 
+    /** Foutmelding bij status=FAILED (OIN-antispoofing, watchdog-timeout, e.d.). */
+    @Column(name = "error_message", columnDefinition = "TEXT")
+    private String errorMessage;
+
     // ── Audit ─────────────────────────────────────────────────────────────
 
     @CreationTimestamp

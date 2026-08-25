@@ -145,7 +145,7 @@ class OutboundMessageServiceRollbackTest {
     void sendFails_afterPersist_marksRollbackOnly_noFurtherStatusSave() throws Exception {
         // Simulate the crash after the entity is persisted with status=PROCESSING.
         Mockito.doThrow(new RuntimeException("transient network failure"))
-            .when(outboundSoapClient).send(anyString(), anyString());
+            .when(outboundSoapClient).send(anyString(), anyString(), anyString(), anyString());
 
         TransactionStatus txStatus = mock(TransactionStatus.class);
 
@@ -179,7 +179,7 @@ class OutboundMessageServiceRollbackTest {
     @DisplayName("send() throws EbmsException → setRollbackOnly() invoked in EbmsException catch branch")
     void sendFails_ebmsException_marksRollbackOnly() throws Exception {
         Mockito.doThrow(new EbmsException("SEND_FAILED", "boom"))
-            .when(outboundSoapClient).send(anyString(), anyString());
+            .when(outboundSoapClient).send(anyString(), anyString(), anyString(), anyString());
 
         TransactionStatus txStatus = mock(TransactionStatus.class);
 

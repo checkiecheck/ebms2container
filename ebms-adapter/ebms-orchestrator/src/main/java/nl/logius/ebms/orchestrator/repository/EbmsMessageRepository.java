@@ -52,4 +52,18 @@ public interface EbmsMessageRepository extends JpaRepository<EbmsMessageEntity, 
           AND m.status NOT IN ('DELIVERED', 'ACKNOWLEDGED', 'FAILED', 'DUPLICATE')
         """)
     List<EbmsMessageEntity> findExpiredMessages(@Param("now") Instant now);
+
+    /**
+     * Watchdog: berichten die langer dan de threshold vaststaan op PROCESSING (bijv. door een
+     * gecrashte verwerkingsthread of ontbrekende AMQP-ack), gebruikt door
+     * {@code MessageStatusReconciliationScheduler}. {@code updatedAt} wordt gebruikt (niet het
+     * ebXML {@code timestamp}-veld) omdat dat betrouwbaar het moment markeert waarop de rij
+     * voor het laatst is bijgewerkt (incl. de overgang naar PROCESSING).
+     */
+    @Query("""
+        SELECT m FROM EbmsMessageEntity m
+        WHERE m.status = 'PROCESSING'
+          AND m.updatedAt < :threshold
+        """)
+    List<EbmsMessageEntity> findStuckProcessingMessages(@Param("threshold") Instant threshold);
 }

@@ -121,7 +121,7 @@ public class OutboundMessageService {
             EbmsMessageEntity entity = persistOutboundMessage(message, header, rawSoapXml, channel);
 
             // ── 6. Versturen via CXF SOAP-client ──────────────────────────
-            outboundSoapClient.send(channel.getEndpointUrl(), rawSoapXml);
+            outboundSoapClient.send(channel.getEndpointUrl(), rawSoapXml, cpaId, toPartyId);
 
             // ── 7. Status-machine bijwerken ────────────────────────────────
             if (requireAck) {

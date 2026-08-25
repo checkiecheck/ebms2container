@@ -407,6 +407,46 @@ conform bestaande stijl (RestClientConfig, RetryProperties patterns).
   een malformed `.tablename`-identifier. Geen `retest_needed`. Restrisico: geen Docker/Testcontainers
   in sandbox, dus geen live 2-schema Postgres-test uitgevoerd (aanbevolen in CI).
 
+### Release 1.1 – Dynamic mTLS, Anti-Spoofing & Watchdog (voltooid – augustus 2026)
+
+#### Task 1 – Outbound mTLS Client met dynamische CPA-trust
+- [x] `common/model/cpa/PartnerCertificateDto.java` (NIEUW) – DTO voor cpa-service's
+  `GET /api/cpa/{cpaId}/certificates/{partyId}` respons
+- [x] `service/CpaValidationService.getPartnerCertificates(cpaId, partyId)` – haalt geldige
+  partnercertificaten op; fail-closed (`CERTIFICATE_NOT_FOUND` / `CPA_SERVICE_UNAVAILABLE`)
+- [x] `soap/OutboundSoapClient.send(endpointUrl, rawSoapXml, cpaId, toPartyId)` – nieuwe 4-arg
+  signatuur; voor HTTPS-endpoints wordt de trust dynamisch opgebouwd (in-memory PKCS12
+  trust-anchors uit CPA-certificaten) i.p.v. een statische truststore; lokale keystore blijft
+  voor de client-identity (key material). Zonder geldig certificaat: bericht faalt direct
+  (gebruikerskeuze, geen fallback).
+- [x] `OutboundPipelineIntegrationTest` + `OutboundMessageServiceRollbackTest` – bijgewerkt naar
+  4-arg `send()` mocks/verifies.
+
+#### Task 2 – Inbound OIN-validatie (Anti-Spoofing)
+- [x] `service/OrchestratorService.validateInboundOin()` – nieuwe stap 0 vóór CPA-validatie:
+  vergelijkt gateway-OIN (`X-Forwarded-Client-OIN`) met `eb:From/PartyId`; bij mismatch of
+  ontbrekende header (indien `ebms.security.enforce-inbound-oin-validation=true`, standaard)
+  wordt het bericht als FAILED gepersisteerd + `EbmsException("SecurityFailure", ...)` gegooid
+- [x] `soap/EbmsMessageProvider` – nieuwe `catch (EbmsException e)` vertaalt `errorCode` naar een
+  ebXML SOAP Fault (i.p.v. generieke "Unknown")
+- [x] `entity/EbmsMessageEntity.errorMessage` (NIEUW veld) + `V4__add_error_message.sql`
+
+#### Task 3 – Transient Status & Watchdog Reconciliator
+- [x] `scheduler/MessageStatusReconciliationScheduler.java` (NIEUW) – `@Scheduled` (standaard elke
+  5 min, `ebms.watchdog.check-interval-ms`) markeert berichten die langer dan
+  `ebms.watchdog.stuck-processing-timeout-minutes` (standaard 5) vaststaan op PROCESSING als
+  FAILED met verklarende `errorMessage`
+- [x] `repository/EbmsMessageRepository.findStuckProcessingMessages(threshold)` (NIEUW)
+
+- **Testing_agent verificatie (geslaagd):** JDK 21 + Maven 3.9.9; `mvn compile`/`test-compile`
+  SUCCESS voor ebms-common, cpa-service, ebms-orchestrator. 3 nieuwe Mockito-testklassen
+  (`OutboundSoapClientDynamicTrustTest`, `OrchestratorServiceAntiSpoofingTest`,
+  `MessageStatusReconciliationSchedulerTest`, 9 tests) + volledige bestaande non-Testcontainers
+  suite: 22/22 groen, geen regressies. Testcontainers-tests (Docker) niet uitgevoerd in sandbox
+  (bekende restrictie) – aanbevolen in CI.
+- **Openstaand (bewust uitgesteld, gebruikerskeuze):** Helm-chart keystore Secret-volume-fix
+  (i.p.v. lege PVC) – zie eerdere backlog-notitie, nog niet opgepakt.
+
 ### P0 – Fase 4: auditor-service (NIEUW)
 - [ ] Aparte Spring Boot microservice op poort 8083 voor append-only audit-events
 - [ ] Verwerkt `AuditEvent` AMQP-berichten van orchestrator en crypto-service

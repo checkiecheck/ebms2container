@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import nl.logius.ebms.common.exception.EbmsException;
 import nl.logius.ebms.common.model.cpa.CpaDto;
 import nl.logius.ebms.common.model.cpa.DeliveryChannelDto;
+import nl.logius.ebms.common.model.cpa.PartnerCertificateDto;
 import nl.logius.ebms.common.model.cpa.PartyInfoDto;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.ParameterizedTypeReference;
@@ -132,6 +133,47 @@ public class CpaValidationService {
             log.error("[CPA] cpa-service onbereikbaar bij kanaal-lookup: {}", e.getMessage());
             throw new EbmsException("CPA_SERVICE_UNAVAILABLE",
                 "cpa-service onbereikbaar voor kanaal-lookup: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Haalt de geldige (niet-verlopen) partnercertificaten op voor een CPA-partij.
+     *
+     * <p>Gebruikt door {@link nl.logius.ebms.orchestrator.soap.OutboundSoapClient} om de
+     * outbound mTLS trust dynamisch op te bouwen op basis van de CPA-registry, i.p.v. een
+     * statische truststore. Fail-closed: zonder geldig certificaat wordt het bericht direct
+     * als mislukt beschouwd.
+     *
+     * @param cpaId  de CPA-identifier
+     * @param partyId partij-ID van de ontvanger
+     * @return niet-lege lijst van geldige {@link PartnerCertificateDto}'s
+     * @throws EbmsException als er geen geldig certificaat gevonden wordt of de service onbereikbaar is
+     */
+    public List<PartnerCertificateDto> getPartnerCertificates(String cpaId, String partyId) {
+        log.debug("[CPA] Partnercertificaten opzoeken: cpaId={} partyId={}", cpaId, partyId);
+        try {
+            List<PartnerCertificateDto> certificates = cpaRestClient.get()
+                .uri("/api/cpa/{cpaId}/certificates/{partyId}", cpaId, partyId)
+                .retrieve()
+                .body(new ParameterizedTypeReference<>() {});
+
+            if (certificates == null || certificates.isEmpty()) {
+                throw new EbmsException("CERTIFICATE_NOT_FOUND",
+                    "Geen geldig partnercertificaat gevonden voor CPA=" + cpaId + " party=" + partyId);
+            }
+            log.debug("[CPA] {} geldig(e) partnercertificaat(en) gevonden: CPA={} party={}",
+                certificates.size(), cpaId, partyId);
+            return certificates;
+
+        } catch (HttpClientErrorException.NotFound e) {
+            throw new EbmsException("CERTIFICATE_NOT_FOUND",
+                "Geen partnercertificaat gevonden: CPA=" + cpaId + " party=" + partyId);
+        } catch (EbmsException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("[CPA] cpa-service onbereikbaar bij certificaat-lookup: {}", e.getMessage());
+            throw new EbmsException("CPA_SERVICE_UNAVAILABLE",
+                "cpa-service onbereikbaar voor certificaat-lookup: " + e.getMessage());
         }
     }
 }

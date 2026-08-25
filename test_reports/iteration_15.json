@@ -1,0 +1,42 @@
+{
+  "summary": "Backend-only Java/Maven verification of 3 roadmap tasks: (1) dynamic CPA-based outbound mTLS trust in OutboundSoapClient, (2) inbound OIN anti-spoofing in OrchestratorService, (3) MessageStatusReconciliationScheduler watchdog. Installed JDK 21.0.2 + Maven 3.9.9 (previous installs lost). `mvn compile` + `mvn test-compile` for ebms-common, cpa-service, ebms-orchestrator ALL SUCCESS. Wrote 3 new focused Mockito test classes (9 new tests total) + ran full non-Testcontainers suite for ebms-orchestrator: 22/22 tests PASS (all previously existing tests + 9 new). Testcontainers-based integration tests skipped (no Docker in sandbox — documented restriction). cpa-service unit tests 1/1 PASS (only integration test needs Docker).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/ebms-adapter/ebms-orchestrator/src/test/java/nl/logius/ebms/orchestrator/soap/OutboundSoapClientDynamicTrustTest.java",
+    "/app/ebms-adapter/ebms-orchestrator/src/test/java/nl/logius/ebms/orchestrator/service/OrchestratorServiceAntiSpoofingTest.java",
+    "/app/ebms-adapter/ebms-orchestrator/src/test/java/nl/logius/ebms/orchestrator/scheduler/MessageStatusReconciliationSchedulerTest.java",
+    "/app/ebms-adapter/ebms-orchestrator/target/surefire-reports/"
+  ],
+  "action_items": [
+    "None required for the 3 tasks under review — all compile clean, all new + existing unit tests pass.",
+    "Optional (out of scope for this session): the Testcontainers integration tests (OutboundPipelineIntegrationTest, InboundPipelineIntegrationTest, OrchestratorServiceIntegrationTest, CpaServiceIntegrationTest) still require Docker to run end-to-end incl. Flyway V4 migration on a real Postgres — verify in CI where Docker is available."
+  ],
+  "critical_code_review_comments": [
+    "OutboundSoapClient: send() correctly gates the dynamic CPA cert lookup behind isHttps(); for plain http, cpaValidationService is never touched (verified by test (c)). Fail-closed contract holds: CERTIFICATE_NOT_FOUND / CPA_SERVICE_UNAVAILABLE from CpaValidationService propagates unchanged (test (b)); dispatch is never reached when trust build cannot succeed.",
+    "OutboundSoapClient.buildDynamicSslContext catches everything as MTLS_TRUST_ERROR — but the initial cpaValidationService.getPartnerCertificates() call is OUTSIDE the try/catch, so its EbmsException correctly bubbles up with its original errorCode (e.g. CERTIFICATE_NOT_FOUND). Verified.",
+    "OrchestratorService.validateInboundOin: step 0 executes BEFORE cpaValidationService.validateCpaAndOin — verified by test (b) that asserts validateCpaAndOin was never called on OIN mismatch. Rejection persists a FAILED row with errorMessage set (field added via V4 migration + entity update).",
+    "OrchestratorService: on blank clientOin + enforce=true, the code correctly persists a FAILED row and throws SecurityFailure; on enforce=false, it warn-logs and continues. Verified by tests (c) and (d).",
+    "EbmsMessageProvider: the new catch (EbmsException e) block sits between DuplicateMessageException and generic Exception, and correctly maps e.getErrorCode() → soapHelper.createErrorResponse(errorCode, message, null). This means a SecurityFailure raised by validateInboundOin produces a SOAP fault with faultCode 'SecurityFailure' (not the generic 'Unknown'). Verified by code review; not covered by a dedicated unit test because the provider requires JAX-WS WebServiceContext plumbing — the existing RawPayloadCaptureInterceptorTest exercises the surrounding wiring.",
+    "MessageStatusReconciliationScheduler: threshold = Instant.now().minusSeconds(stuckProcessingTimeoutMinutes * 60L) — correct; @Scheduled fixedDelayString reads ebms.watchdog.check-interval-ms (default 300000ms). saveAll called only when the stuck list is non-empty. All verified.",
+    "EbmsMessageRepository.findStuckProcessingMessages: JPQL is syntactically valid ('SELECT m FROM EbmsMessageEntity m WHERE m.status = ''PROCESSING'' AND m.updatedAt < :threshold'). Compile-time JPA metamodel + Spring Data proxy generation succeed as part of mvn test-compile; runtime query validation happens at Hibernate SessionFactory bootstrap which is covered whenever a *IntegrationTest boots the Spring context (Testcontainers required — deferred to CI).",
+    "PartnerCertificateDto: @JsonIgnoreProperties(ignoreUnknown = true) + all fields with @Getter/@Setter make it a valid Jackson deserialization target for the cpa-service response shape.",
+    "Flyway V4 migration file syntactically OK (ALTER TABLE ADD COLUMN IF NOT EXISTS + COMMENT). Actual apply-on-top-of-V3 will be validated whenever a Testcontainers-backed test class runs; not runnable in sandbox but the SQL is standard PostgreSQL.",
+    "Minor observation (non-blocking): OutboundSoapClient logs 'CXF HTTPConduit niet beschikbaar – fallback timeout: not a proxy instance' during the http/https tests because the JDK-based dispatch does not expose an HTTPConduit. This is the pre-existing fallback branch — no regression, message flow is unaffected. The mTLS TLSClientParameters setter path is likewise fallback-noop in a pure JDK dispatch, but the SSLContext build itself is what the test verifies."
+  ],
+  "updated_files": [
+    "/app/ebms-adapter/ebms-orchestrator/src/test/java/nl/logius/ebms/orchestrator/soap/OutboundSoapClientDynamicTrustTest.java (NEW, 3 tests)",
+    "/app/ebms-adapter/ebms-orchestrator/src/test/java/nl/logius/ebms/orchestrator/service/OrchestratorServiceAntiSpoofingTest.java (NEW, 4 tests)",
+    "/app/ebms-adapter/ebms-orchestrator/src/test/java/nl/logius/ebms/orchestrator/scheduler/MessageStatusReconciliationSchedulerTest.java (NEW, 2 tests)"
+  ],
+  "success_rate": {
+    "backend": "100% (22/22 non-Testcontainers tests in ebms-orchestrator pass; 1/1 non-Testcontainers test in cpa-service passes; mvn compile + test-compile SUCCESS for all 3 modules)",
+    "frontend": "N/A (skipped per request — backend Java project)"
+  },
+  "test_credentials": "N/A",
+  "seed_data_creation": "Self-signed X.509 PEM (CN=test, RSA 2048, 10-yr validity) embedded as a String literal in OutboundSoapClientDynamicTrustTest for the SSLContext build assertion.",
+  "retest_needed": false,
+  "main_agent_can_self_test": false,
+  "context_for_next_testing_agent": "JDK 21.0.2 at /tmp/jdk-21.0.2, Maven 3.9.9 at /tmp/apache-maven-3.9.9 (both may be lost on pod restart — download URLs: https://download.java.net/java/GA/jdk21.0.2/f2283984656d49d69e91c558476027ac/13/GPL/openjdk-21.0.2_linux-aarch64_bin.tar.gz and https://archive.apache.org/dist/maven/maven-3/3.9.9/binaries/apache-maven-3.9.9-bin.tar.gz). Run new suite: `export JAVA_HOME=/tmp/jdk-21.0.2 PATH=$JAVA_HOME/bin:/tmp/apache-maven-3.9.9/bin:$PATH && cd /app/ebms-adapter && mvn -pl ebms-orchestrator -am test -Dtest='!*IntegrationTest,!EbmsOrchestratorApplicationTests' -Dsurefire.failIfNoSpecifiedTests=false`. Docker/Testcontainers still NOT available in sandbox — do NOT run *IntegrationTest classes here (they will error with 'Could not find a valid Docker environment').",
+  "rca of the issue": "N/A — this session is feature verification, not bug RCA. All 3 roadmap tasks compile clean and their unit-testable contracts are covered by 9 new focused Mockito tests, all passing."
+}
