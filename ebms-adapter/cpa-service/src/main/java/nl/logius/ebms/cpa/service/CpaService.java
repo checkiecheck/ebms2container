@@ -23,6 +23,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -141,6 +142,7 @@ public class CpaService {
         syncParties(entity, parsedParties);
 
         CpaEntity saved = cpaRepository.save(entity);
+        syncCertificates(dto.getCpaId(), dto.getCpaXml());
         log.info("CPA aangemaakt: {} ({} partij(en) geëxtraheerd uit XML)",
             saved.getCpaId(), parsedParties.size());
         return enrichWithDetails(cpaMapper.toDto(saved), saved);
@@ -153,7 +155,10 @@ public class CpaService {
      *
      * <p>De {@code cpa_party}-tabel wordt volledig gesynchroniseerd met de nieuwe {@code cpaXml}:
      * partijen die niet langer in de XML voorkomen worden verwijderd (JPA orphan-removal),
-     * bestaande partijen worden bijgewerkt en nieuwe partijen worden toegevoegd.
+     * bestaande partijen worden bijgewerkt en nieuwe partijen worden toegevoegd. Idem voor
+     * {@code partner_certificate}: de XML is de single source of truth, dus handmatig via
+     * {@link #addCertificate} toegevoegde certificaten die niet (meer) in de XML voorkomen
+     * worden bij de volgende create/update verwijderd.
      */
     @CacheEvict(value = "cpa-by-id", key = "#cpaId")
     @Transactional
@@ -176,6 +181,7 @@ public class CpaService {
         syncParties(entity, parsedParties);
 
         CpaEntity saved = cpaRepository.save(entity);
+        syncCertificates(cpaId, dto.getCpaXml());
         log.info("CPA overschreven: {} ({} partij(en) gesynchroniseerd uit XML)",
             cpaId, parsedParties.size());
         return enrichWithDetails(cpaMapper.toDto(saved), saved);
@@ -212,6 +218,14 @@ public class CpaService {
         log.info("CPA verwijderd: {}", cpaId);
     }
 
+    /**
+     * Voegt handmatig een certificaat toe aan een CPA-partner.
+     *
+     * <p><b>Let op:</b> als de CPA-XML zelf ingesloten {@code <Certificate>}-elementen bevat,
+     * geldt de XML als single source of truth - een handmatig toegevoegd certificaat dat niet
+     * (ook) in de XML voorkomt, wordt bij de volgende {@code create}/{@code update} van deze
+     * CPA verwijderd door {@link #syncCertificates}.
+     */
     @Transactional
     public PartnerCertificateEntity addCertificate(PartnerCertificateEntity cert) {
         if (!cpaRepository.existsByCpaId(cert.getCpaId())) {
@@ -263,6 +277,50 @@ public class CpaService {
                     .build());
             }
         }
+    }
+
+    /**
+     * Synchroniseert de {@code partner_certificate}-rijen van een CPA met de certificaten die
+     * ingesloten zijn in de bijbehorende {@code cpaXml}. De XML is single source of truth:
+     * certificaten die niet (meer) in de XML voorkomen worden verwijderd (ook als ze handmatig
+     * via {@link #addCertificate} zijn toegevoegd), bestaande worden bijgewerkt en nieuwe
+     * worden toegevoegd. Natuurlijke sleutel: {@code (partyId, certificateAlias)}.
+     */
+    private void syncCertificates(String cpaId, String cpaXml) {
+        List<PartnerCertificateEntity> parsed = partyXmlParser.parseCertificates(cpaXml, cpaId);
+        List<PartnerCertificateEntity> existing = certRepository.findByCpaId(cpaId);
+
+        Map<String, PartnerCertificateEntity> existingByKey = existing.stream()
+            .collect(Collectors.toMap(this::certKey, e -> e, (a, b) -> a));
+        Set<String> parsedKeys = parsed.stream().map(this::certKey).collect(Collectors.toSet());
+
+        List<PartnerCertificateEntity> toDelete = existing.stream()
+            .filter(e -> !parsedKeys.contains(certKey(e)))
+            .toList();
+        if (!toDelete.isEmpty()) {
+            certRepository.deleteAll(toDelete);
+        }
+
+        List<PartnerCertificateEntity> toSave = new ArrayList<>();
+        for (PartnerCertificateEntity p : parsed) {
+            PartnerCertificateEntity existingCert = existingByKey.get(certKey(p));
+            if (existingCert != null) {
+                existingCert.setCertificatePem(p.getCertificatePem());
+                existingCert.setValidFrom(p.getValidFrom());
+                existingCert.setValidUntil(p.getValidUntil());
+                existingCert.setCertificateUsage(p.getCertificateUsage());
+                toSave.add(existingCert);
+            } else {
+                toSave.add(p);
+            }
+        }
+        if (!toSave.isEmpty()) {
+            certRepository.saveAll(toSave);
+        }
+    }
+
+    private String certKey(PartnerCertificateEntity cert) {
+        return cert.getPartyId() + "::" + cert.getCertificateAlias();
     }
 
     private CpaDto enrichWithDetails(CpaDto dto, CpaEntity entity) {

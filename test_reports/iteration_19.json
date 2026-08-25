@@ -1,0 +1,32 @@
+{
+  "summary": "Backend-only testing of certificate XML sync (iteration_19 follow-up to iteration_18 party sync). Added test-scoped BouncyCastle to cpa-service pom, wrote CpaCertificateXmlParserTest (18 tests, real self-signed X.509 via BouncyCastle) and CpaServiceCertificateSyncTest (7 Mockito tests covering add/update-in-place/remove + 'XML wins over manual upload' rule on both create() and update()). All 58 unit tests pass (25 new + 33 existing regression: CpaPartyXmlParserTest 12, CpaServicePartySyncTest 5, CpaServiceUpdateTest 10, CpaControllerUpdateTest 6). Main agent's assumption confirmed: Mockito's default empty-list return for unstubbed certRepository.findByCpaId() and partyXmlParser.parseCertificates() does NOT NPE or break strict-stubbing in the existing tests. `mvn compile` and `mvn test-compile` succeed cleanly with no warnings introduced.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "CpaServiceIntegrationTest", "issue": "Testcontainers integration test errors with 'Could not find a valid Docker environment' - PRE-EXISTING, unrelated to this change (no Docker in the preview container). Not a code defect."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/ebms-adapter/cpa-service/src/test/java/nl/logius/ebms/cpa/util/CpaCertificateXmlParserTest.java",
+    "/app/ebms-adapter/cpa-service/src/test/java/nl/logius/ebms/cpa/service/CpaServiceCertificateSyncTest.java"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "CpaPartyXmlParser.parseCertificates() correctly uses XXE-safe parseDocument(), namespace-agnostic getElementsByTagNameNS('*',...), strips whitespace from base64 via replaceAll('\\\\s+', ''), and parses validFrom/validUntil from the real X.509 (not from XML). Garbage base64 and empty X509Certificate are safely skipped with warn-log rather than thrown. Good.",
+    "CpaService.syncCertificates() reconciliation uses natural key (partyId + '::' + alias). Update-in-place preserves the same DB row (PK) which is essential to keep FK relationships intact. XML-wins rule works symmetrically on both create() and update() as user requested.",
+    "Minor consideration (not a bug): guessUsage() will classify an alias like 'design-certificate' as SIGNING because 'sign' is a substring. Consider word-boundary matching if false positives ever surface, but the current heuristic matches the spec ('contains sign/encrypt case-insensitively').",
+    "CpaService now has 6 collaborators via constructor - still acceptable. If it grows further consider splitting party-sync and cert-sync into a dedicated CpaXmlSyncService.",
+    "Test scope: CpaServiceCertificateSyncTest exercises the reconciliation orchestration; the DB uniqueness constraint (cpa_id, party_id, certificate_alias) is not exercised at the JPA level here - covered by the existing SpringBootTest integration test (skipped due to missing Docker)."
+  ],
+  "updated_files": [
+    "/app/ebms-adapter/cpa-service/pom.xml (added test-scoped bcprov-jdk18on + bcpkix-jdk18on)",
+    "/app/ebms-adapter/cpa-service/src/test/java/nl/logius/ebms/cpa/util/CpaCertificateXmlParserTest.java (new, 18 tests)",
+    "/app/ebms-adapter/cpa-service/src/test/java/nl/logius/ebms/cpa/service/CpaServiceCertificateSyncTest.java (new, 7 tests)"
+  ],
+  "success_rate": {"backend": "100% (58/58 unit tests; 1 pre-existing Testcontainers integration test skipped due to no-Docker env)"},
+  "seed_data_creation": "None (self-signed X.509 certs generated in-memory per test class via BouncyCastle helper).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "cpa-service now has BouncyCastle at test scope (bcprov/bcpkix-jdk18on). CpaService constructor takes 6 collaborators: cpaRepository, partyRepository, channelRepository, certRepository, cpaMapper, partyXmlParser. syncCertificates() is unconditionally called after cpaRepository.save() in both create() and update(). Full regression suite for cpa-service (excluding the Docker-dependent CpaServiceIntegrationTest) is green under JDK 21.0.2 at /tmp/jdk-21.0.2 + Maven 3.9.9 at /tmp/apache-maven-3.9.9."
+}

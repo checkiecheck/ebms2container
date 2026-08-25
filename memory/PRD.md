@@ -486,6 +486,26 @@ Gebruiker constateerde: `cpa_party` werd nooit gevuld uit `cpaXml` (bij POST noc
 - Kleine defensieve fix uit code review toegepast: `Collectors.toMap()` merge-functie tegen
   dubbele partyId's (DB unique-constraint voorkomt dit al, maar nu ook JVM-safe).
 
+### CPA-certificaat XML-synchronisatie (voltooid – augustus 2026)
+
+Vervolg op partij-sync: certificaten staan al expliciet ingesloten in de CPA XML
+(`<Certificate>`/`<X509Certificate>` binnen `<PartyInfo>`), dus "auto-suggest matching" was
+overbodig — in plaats daarvan volledige auto-sync, net als bij partijen.
+- [x] `CpaPartyXmlParser.parseCertificates(cpaXml, cpaId)` (NIEUW) – extraheert per partij
+  ingesloten certificaten; `validFrom`/`validUntil` komen uit het echte X.509-certificaat
+  (niet gegokt uit XML); `certificateAlias` = `certId`-attribuut of fallback; `certificateUsage`
+  heuristiek op basis van alias (sign/encrypt)
+- [x] `CpaService.syncCertificates()` (NIEUW, private) – volledige reconciliatie tegen
+  `partner_certificate` op sleutel `(partyId, certificateAlias)`: verwijderen/bijwerken/toevoegen,
+  aangeroepen vanuit zowel `create()` als `update()`
+- [x] `PartnerCertificateRepository.findByCpaId()` (NIEUW)
+- **Gebruikerskeuze:** XML is single source of truth – een handmatig via
+  `POST /api/cpa/{cpaId}/certificates` toegevoegd certificaat dat niet in de XML voorkomt,
+  wordt bij de volgende create/update van die CPA verwijderd (bewust, expliciet gekozen).
+- **Testing_agent verificatie (geslaagd):** 58/58 tests (25 nieuw incl. echte X.509-certs via
+  test-scoped BouncyCastle, 33 regressie herverifieerd). Geen kritieke issues. Testcontainers
+  nog niet beschikbaar in sandbox (bekende restrictie, pre-existing).
+
 ### P0 – Fase 4: auditor-service (NIEUW)
 - [ ] Aparte Spring Boot microservice op poort 8083 voor append-only audit-events
 - [ ] Verwerkt `AuditEvent` AMQP-berichten van orchestrator en crypto-service

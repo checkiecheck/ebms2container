@@ -13,6 +13,9 @@ public interface PartnerCertificateRepository extends JpaRepository<PartnerCerti
 
     List<PartnerCertificateEntity> findByCpaIdAndPartyId(String cpaId, String partyId);
 
+    /** Alle certificaten voor een CPA (tbv volledige reconciliatie met de cpaXml). */
+    List<PartnerCertificateEntity> findByCpaId(String cpaId);
+
     /** Geldig op een bepaald tijdstip (tbv certificaatrotatie). */
     List<PartnerCertificateEntity> findByCpaIdAndPartyIdAndValidUntilAfter(
         String cpaId, String partyId, Instant now);
