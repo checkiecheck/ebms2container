@@ -11,6 +11,7 @@ import nl.logius.ebms.cpa.repository.CpaDeliveryChannelRepository;
 import nl.logius.ebms.cpa.repository.CpaPartyRepository;
 import nl.logius.ebms.cpa.repository.CpaRepository;
 import nl.logius.ebms.cpa.repository.PartnerCertificateRepository;
+import nl.logius.ebms.cpa.util.CpaPartyXmlParser;
 import nl.logius.ebms.common.exception.CpaNotFoundException;
 import nl.logius.ebms.common.exception.EbmsException;
 import nl.logius.ebms.common.model.cpa.CpaDto;
@@ -23,7 +24,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Businesslogica voor CPA-beheer en -opzoekingen.
@@ -44,6 +47,7 @@ public class CpaService {
     private final CpaDeliveryChannelRepository channelRepository;
     private final PartnerCertificateRepository certRepository;
     private final CpaMapper                  cpaMapper;
+    private final CpaPartyXmlParser           partyXmlParser;
 
     // ── Lees-operaties ────────────────────────────────────────────────────
 
@@ -133,15 +137,23 @@ public class CpaService {
                 "CPA bestaat al: " + dto.getCpaId() + ". Gebruik update (PUT) of verwijder eerst.");
         }
         CpaEntity entity = cpaMapper.toEntity(dto);
+        List<PartyInfoDto> parsedParties = partyXmlParser.parseParties(dto.getCpaXml());
+        syncParties(entity, parsedParties);
+
         CpaEntity saved = cpaRepository.save(entity);
-        log.info("CPA aangemaakt: {}", saved.getCpaId());
-        return cpaMapper.toDto(saved);
+        log.info("CPA aangemaakt: {} ({} partij(en) geëxtraheerd uit XML)",
+            saved.getCpaId(), parsedParties.size());
+        return enrichWithDetails(cpaMapper.toDto(saved), saved);
     }
 
     /**
      * Volledige overwrite van een bestaande CPA (description, startDate, endDate, status,
      * cpaXml). Gebruikt door het admin-dashboard om een geüploade CPA met een duplicaat-ID
      * te overschrijven i.p.v. te weigeren. Cpa-ID en aanmaakdatum blijven ongewijzigd.
+     *
+     * <p>De {@code cpa_party}-tabel wordt volledig gesynchroniseerd met de nieuwe {@code cpaXml}:
+     * partijen die niet langer in de XML voorkomen worden verwijderd (JPA orphan-removal),
+     * bestaande partijen worden bijgewerkt en nieuwe partijen worden toegevoegd.
      */
     @CacheEvict(value = "cpa-by-id", key = "#cpaId")
     @Transactional
@@ -160,8 +172,12 @@ public class CpaService {
             entity.setStatus(dto.getStatus());
         }
 
+        List<PartyInfoDto> parsedParties = partyXmlParser.parseParties(dto.getCpaXml());
+        syncParties(entity, parsedParties);
+
         CpaEntity saved = cpaRepository.save(entity);
-        log.info("CPA overschreven: {}", cpaId);
+        log.info("CPA overschreven: {} ({} partij(en) gesynchroniseerd uit XML)",
+            cpaId, parsedParties.size());
         return enrichWithDetails(cpaMapper.toDto(saved), saved);
     }
 
@@ -208,6 +224,46 @@ public class CpaService {
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────
+
+    /**
+     * Synchroniseert de {@code parties}-collectie van een CPA-entiteit met de partijen die
+     * geëxtraheerd zijn uit de bijbehorende {@code cpaXml}: verwijdert partijen die niet meer
+     * voorkomen (JPA orphan-removal bij save), werkt bestaande partijen bij en voegt nieuwe toe.
+     * De {@code cpa_id} kolom wordt expliciet gezet (de {@code @ManyToOne}-koppeling zelf is
+     * {@code insertable=false, updatable=false}).
+     */
+    private void syncParties(CpaEntity cpaEntity, List<PartyInfoDto> parsedParties) {
+        List<CpaPartyEntity> existing = cpaEntity.getParties();
+        Map<String, CpaPartyEntity> existingByPartyId = existing.stream()
+            .collect(Collectors.toMap(CpaPartyEntity::getPartyId, p -> p, (a, b) -> a));
+
+        Set<String> parsedPartyIds = parsedParties.stream()
+            .map(PartyInfoDto::getPartyId)
+            .collect(Collectors.toSet());
+        existing.removeIf(p -> !parsedPartyIds.contains(p.getPartyId()));
+
+        for (PartyInfoDto parsed : parsedParties) {
+            CpaPartyEntity partyEntity = existingByPartyId.get(parsed.getPartyId());
+            if (partyEntity != null) {
+                partyEntity.setPartyIdType(parsed.getPartyIdType());
+                partyEntity.setOin(parsed.getOin());
+                partyEntity.setOinValidated(parsed.isOinValidated());
+                partyEntity.setRole(parsed.getRole());
+                partyEntity.setService(parsed.getService());
+            } else {
+                existing.add(CpaPartyEntity.builder()
+                    .cpaEntity(cpaEntity)
+                    .cpaId(cpaEntity.getCpaId())
+                    .partyId(parsed.getPartyId())
+                    .partyIdType(parsed.getPartyIdType())
+                    .oin(parsed.getOin())
+                    .oinValidated(parsed.isOinValidated())
+                    .role(parsed.getRole())
+                    .service(parsed.getService())
+                    .build());
+            }
+        }
+    }
 
     private CpaDto enrichWithDetails(CpaDto dto, CpaEntity entity) {
         List<PartyInfoDto> parties = entity.getParties().stream()

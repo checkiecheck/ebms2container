@@ -1,0 +1,30 @@
+{
+  "summary": "Backend-only test iteration for cpa-service CpaPartyXmlParser + syncParties (server-side XML->cpa_party persistence). Added 12 focused JUnit tests for CpaPartyXmlParser (namespace-agnostic parsing, OIN validation, role/service extraction, skip rules, XXE protection, malformed XML fail-safe) and 5 Mockito tests for CpaService.create/update syncParties behavior (create populates parties, empty parsed list, full reconcile add/update/remove, empty list wipes all, unchanged=in-place). Re-ran existing CpaServiceUpdateTest (10) and CpaControllerUpdateTest (6). All 33 tests pass. Docker/Testcontainers unavailable in sandbox so CpaServiceIntegrationTest party-sync scenario was not executed - known restriction.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/ebms-adapter/cpa-service/src/test/java/nl/logius/ebms/cpa/util/CpaPartyXmlParserTest.java",
+    "/app/ebms-adapter/cpa-service/src/test/java/nl/logius/ebms/cpa/service/CpaServicePartySyncTest.java",
+    "/app/ebms-adapter/cpa-service/src/test/java/nl/logius/ebms/cpa/service/CpaServiceUpdateTest.java"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "CpaPartyXmlParser.parsePartyInfo uses getElementsByTagNameNS('*', 'PartyId') via firstDescendant, which searches all descendants. For nested PartyInfo (unlikely in ebXML CPA v2.0 but theoretically possible) this could pick up a PartyId from a nested element. Acceptable for CPA v2.0 schema but worth documenting.",
+    "syncParties() Collectors.toMap() will throw IllegalStateException if the existing parties list somehow contains two rows with the same partyId (duplicate key). Given the DB unique constraint (cpa_id, party_id) this shouldn't happen, but a merge function (p1,p2)->p1 would be defensive.",
+    "PartyId 'type' attribute lookup uses unqualified getAttribute('type') - if a CPA XML uses a namespaced attribute like tp:type='...', partyIdType will be null. Real-world CPA v2.0 documents use unqualified 'type' so this is fine, but call it out."
+  ],
+  "updated_files": [
+    "/app/ebms-adapter/cpa-service/src/test/java/nl/logius/ebms/cpa/util/CpaPartyXmlParserTest.java (NEW)",
+    "/app/ebms-adapter/cpa-service/src/test/java/nl/logius/ebms/cpa/service/CpaServicePartySyncTest.java (NEW)"
+  ],
+  "success_rate": {"backend": "100% (33/33)", "frontend": "N/A"},
+  "test_credentials": "N/A",
+  "seed_data_creation": "N/A - all Mockito unit tests, no DB",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "cpa-service has 33 unit tests covering party XML sync end-to-end at the service layer. Docker/Testcontainers still unavailable (same as iterations 15-17), so CpaServiceIntegrationTest was not exercised. If Docker becomes available, add an integration test: POST CPA with 2 PartyInfo -> GET /parties returns 2; PUT with 1 removed + 1 modified + 1 new -> final count=2 with expected roles.",
+  "rca of the issue": "N/A - no issues found. Implementation matches request: namespace-agnostic parsing via getElementsByTagNameNS('*',...), XXE-safe (disallow-doctype-decl=true + external entities disabled), fail-safe empty-list fallback on parse errors, orphanRemoval-friendly in-place mutation of cpaEntity.getParties() in syncParties()."
+}

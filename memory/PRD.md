@@ -468,6 +468,24 @@ Gebruiker constateerde: cpa-service had geen PUT/update endpoint (alleen POST-cr
   `@WebMvcTest`), frontend 6/6 Playwright-flows groen (upload nieuw/bestaand, modal
   confirm/cancel, status-toggle). Geen regressies.
 
+### CPA-partij XML-synchronisatie (voltooid – augustus 2026)
+
+Gebruiker constateerde: `cpa_party` werd nooit gevuld uit `cpaXml` (bij POST noch PUT) –
+`CpaMapper.toEntity()` had `@Mapping(target="parties", ignore=true)`.
+- [x] `cpa-service/util/CpaPartyXmlParser.java` (NIEUW) – namespace-agnostisch
+  (`getElementsByTagNameNS("*", ...)`) parsen van `<PartyInfo>`/`<PartyId>` (+ optioneel
+  `<CollaborationRole>/<Role>/<ServiceBinding>/<Service>`); XXE-veilig (DOCTYPE/externe
+  entities uitgeschakeld); fail-safe (retourneert lege lijst bij parsefout, CPA blijft geldig)
+- [x] `CpaService.syncParties()` (NIEUW, private) – reconcileert `cpaEntity.getParties()` met de
+  geparste lijst: verwijdert (JPA orphan-removal), werkt bestaand bij, voegt nieuw toe;
+  aangeroepen vanuit zowel `create()` als `update()` zodat de DB 100% consistent blijft met de
+  laatst geüploade `cpaXml`
+- **Testing_agent verificatie (geslaagd):** 33/33 tests (12 nieuw voor de parser, 5 nieuw voor
+  `syncParties`-gedrag, 16 bestaand herverifieerd). Geen regressies. Testcontainers/Docker nog
+  niet beschikbaar in sandbox (bekende restrictie) – party-sync integratietest aanbevolen in CI.
+- Kleine defensieve fix uit code review toegepast: `Collectors.toMap()` merge-functie tegen
+  dubbele partyId's (DB unique-constraint voorkomt dit al, maar nu ook JVM-safe).
+
 ### P0 – Fase 4: auditor-service (NIEUW)
 - [ ] Aparte Spring Boot microservice op poort 8083 voor append-only audit-events
 - [ ] Verwerkt `AuditEvent` AMQP-berichten van orchestrator en crypto-service

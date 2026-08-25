@@ -9,6 +9,7 @@ import nl.logius.ebms.cpa.repository.CpaDeliveryChannelRepository;
 import nl.logius.ebms.cpa.repository.CpaPartyRepository;
 import nl.logius.ebms.cpa.repository.CpaRepository;
 import nl.logius.ebms.cpa.repository.PartnerCertificateRepository;
+import nl.logius.ebms.cpa.util.CpaPartyXmlParser;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -40,6 +41,7 @@ class CpaServiceUpdateTest {
     @Mock  CpaDeliveryChannelRepository channelRepository;
     @Mock  PartnerCertificateRepository certRepository;
     @Mock  CpaMapper cpaMapper;
+    @Mock  CpaPartyXmlParser partyXmlParser;
 
     @InjectMocks
     CpaService cpaService;
@@ -50,6 +52,8 @@ class CpaServiceUpdateTest {
 
     @BeforeEach
     void setUp() {
+        lenient().when(partyXmlParser.parseParties(any())).thenReturn(new ArrayList<>());
+
         existing = CpaEntity.builder()
                 .id(UUID.randomUUID())
                 .cpaId(CPA_ID)
