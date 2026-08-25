@@ -447,6 +447,27 @@ conform bestaande stijl (RestClientConfig, RetryProperties patterns).
 - **Openstaand (bewust uitgesteld, gebruikerskeuze):** Helm-chart keystore Secret-volume-fix
   (i.p.v. lege PVC) – zie eerdere backlog-notitie, nog niet opgepakt.
 
+### CPA update-endpoints: PUT (overwrite) + PATCH /status (voltooid – augustus 2026)
+
+Gebruiker constateerde: cpa-service had geen PUT/update endpoint (alleen POST-create + DELETE).
+- [x] `cpa-service/dto/StatusUpdateRequest.java` (NIEUW) – `{status: String}` request-body
+- [x] `CpaService.update(cpaId, dto)` – volledige overwrite (description, startDate, endDate,
+  status, cpaXml); cpaId/createdAt blijven ongewijzigd; preserveert `version` als
+  `dto.getVersion()` null is; `@CacheEvict(cpa-by-id)`
+- [x] `CpaService.updateStatus(cpaId, status)` – Active/Suspend-toggle, valideert tegen
+  `{ACTIVE, SUSPENDED}` (null-safe na bugfix), `@CacheEvict(cpa-by-id)`
+- [x] `CpaController` – `PUT /api/cpa/{cpaId}` en `PATCH /api/cpa/{cpaId}/status` (nieuw)
+- [x] Admin-dashboard (`static/admin/index.html`, CPA Beheer-tab):
+  - "Overschrijf-prompt" modal (`overwrite-confirm-modal`) bij duplicaat-cpaId tijdens upload –
+    checkt via GET of CPA al bestaat, toont modal, roept bij bevestiging PUT aan i.p.v. POST
+  - Status-toggle (Active/Suspend) in de CPA-detailkaart (`cpa-status-toggle-*`), roept PATCH aan
+- **Bugfix tijdens testing:** `updateStatus(cpaId, null)` gooide `NullPointerException`
+  (`Set.of(...).contains(null)`) i.p.v. `EbmsException(INVALID_STATUS)` → HTTP 500 i.p.v. 400.
+  Opgelost met een expliciete null-check vóór de `Set.contains()`-aanroep.
+- **Testing_agent verificatie (geslaagd, 2 runs):** backend 17/17 tests groen (Mockito +
+  `@WebMvcTest`), frontend 6/6 Playwright-flows groen (upload nieuw/bestaand, modal
+  confirm/cancel, status-toggle). Geen regressies.
+
 ### P0 – Fase 4: auditor-service (NIEUW)
 - [ ] Aparte Spring Boot microservice op poort 8083 voor append-only audit-events
 - [ ] Verwerkt `AuditEvent` AMQP-berichten van orchestrator en crypto-service

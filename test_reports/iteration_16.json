@@ -1,0 +1,44 @@
+{
+  "summary": "Verified new CPA PUT (full overwrite) + PATCH /status endpoints in cpa-service and their admin-dashboard frontend integration. Backend: mvn compile clean on cpa-service (JDK 21.0.2 + Maven 3.9.9 re-installed at /tmp/jdk-21.0.2 and /tmp/apache-maven-3.9.9 after pod restart). Wrote 2 new focused test classes (CpaServiceUpdateTest = Mockito, 9 tests; CpaControllerUpdateTest = @WebMvcTest, 6 tests) covering happy-path + 404 + 400 + 409 regression. 14/15 tests pass; 1 failure reveals a REAL bug in CpaService.updateStatus(cpaId, null) - it throws NullPointerException instead of the intended EbmsException(INVALID_STATUS) because Set.of('ACTIVE','SUSPENDED').contains(null) throws NPE on immutable Set. Frontend: served static/admin/index.html via python http.server + Playwright fetch mocking; all 6 flows pass - (1) new-cpa upload -> POST no modal, (2) existing-cpa upload -> overwrite modal shown with correct cpaId, (3) modal cancel -> no PUT/POST, (4) modal confirm -> PUT + 'overschreven' success msg, (5) fetch existing -> status-toggle wrap visible with ACTIVE + 'Suspenderen' button, (6) toggle click -> PATCH with {status:'SUSPENDED'} + label/button update in place; Berichten tab still renders unchanged.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "PATCH /api/cpa/{cpaId}/status (CpaService.updateStatus)",
+        "issue": "When request body is {\"status\": null} or the value normalises to null, CpaService.updateStatus throws java.lang.NullPointerException in Set.of(\"ACTIVE\",\"SUSPENDED\").contains(null) at CpaService.java:174. Expected behaviour per spec: EbmsException(INVALID_STATUS) -> HTTP 400 ProblemDetail. Currently the @ExceptionHandler(Exception.class) in CpaErrorHandler will catch it and return 500 Internal Server Error, which is a broken API contract. Fix: change the guard to `if (normalized == null || !ALLOWED_TOGGLE_STATUSES.contains(normalized))` OR normalise blank/null earlier and always throw EbmsException(INVALID_STATUS) before the Set lookup.",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/ebms-adapter/cpa-service/src/test/java/nl/logius/ebms/cpa/service/CpaServiceUpdateTest.java",
+    "/app/ebms-adapter/cpa-service/src/test/java/nl/logius/ebms/cpa/controller/CpaControllerUpdateTest.java",
+    "/app/test_reports/pytest/TEST-nl.logius.ebms.cpa.service.CpaServiceUpdateTest.xml",
+    "/app/test_reports/pytest/TEST-nl.logius.ebms.cpa.controller.CpaControllerUpdateTest.xml"
+  ],
+  "action_items": [
+    "Fix NPE in CpaService.updateStatus() when status parameter is null - add explicit null guard before Set.of(...).contains() check so it throws EbmsException(INVALID_STATUS) (HTTP 400) instead of NullPointerException (which currently maps to HTTP 500)."
+  ],
+  "critical_code_review_comments": [
+    "Set.of(...) is immutable and throws NPE on .contains(null) - always null-check before calling contains() on immutable Sets.",
+    "CpaService.update() blindly overwrites the entity's version field from the DTO; if a caller sends null version, it silently wipes the previously-set version. Consider preserving existing value when dto.getVersion() is null (same pattern already used for status).",
+    "StatusUpdateRequest has no @NotBlank / @Valid annotation on the status field - a completely empty JSON body {} deserialises to status=null and currently triggers the NPE noted above. Add Bean Validation to fail fast with a 400 at the binding layer.",
+    "CpaErrorHandler maps every non-'ALREADY_EXISTS' EbmsException to 400 via a substring check on the error code - fragile; consider an explicit HttpStatus mapping (Map<String,HttpStatus>) or a status field on EbmsException itself."
+  ],
+  "updated_files": [
+    "/app/ebms-adapter/cpa-service/src/test/java/nl/logius/ebms/cpa/service/CpaServiceUpdateTest.java (NEW)",
+    "/app/ebms-adapter/cpa-service/src/test/java/nl/logius/ebms/cpa/controller/CpaControllerUpdateTest.java (NEW)"
+  ],
+  "success_rate": {"backend": "93% (14/15 new tests)", "frontend": "100% (6/6 flows)"},
+  "test_credentials": "None - no auth in this project.",
+  "seed_data_creation": "None - tests use Mockito stubs (backend) and page.route() fetch interception (frontend).",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "JDK 21.0.2 re-installed at /tmp/jdk-21.0.2 and Maven 3.9.9 at /tmp/apache-maven-3.9.9 (both /tmp, so lost on pod restart - reinstall via curl if missing, URLs in iteration_15). Run backend suite: `export JAVA_HOME=/tmp/jdk-21.0.2 PATH=$JAVA_HOME/bin:/tmp/apache-maven-3.9.9/bin:$PATH && cd /app/ebms-adapter && mvn -pl cpa-service -am test -Dtest='CpaServiceUpdateTest,CpaControllerUpdateTest,CpaServiceApplicationTests' -Dsurefire.failIfNoSpecifiedTests=false`. For frontend: `cd /app/ebms-adapter/ebms-orchestrator/src/main/resources/static && python3 -m http.server 8765 &` then Playwright with fetch mocking via page.route('**/api/cpa**', ...). Docker/Testcontainers still NOT available - do NOT run *IntegrationTest classes. Once main agent fixes the null-status NPE, re-run CpaServiceUpdateTest.updateStatus_null_throwsEbmsException to confirm.",
+  "rca of the issue": "Bug: PATCH /api/cpa/{cpaId}/status with body {\"status\": null} returns HTTP 500 instead of 400. Reproduction: `curl -X PATCH -H 'Content-Type: application/json' -d '{\"status\":null}' http://<host>/api/cpa/<some-existing-cpa>/status`. Root cause: CpaService.java line 173-174: `String normalized = status == null ? null : status.trim().toUpperCase();` produces null, then `ALLOWED_TOGGLE_STATUSES.contains(normalized)` is Set.of(...).contains(null) which is documented to throw NullPointerException in Java's immutable Set implementations (ImmutableCollections.Set12.contains). The NPE bubbles up to CpaErrorHandler.handleGeneral -> 500. Mitigation: add explicit null/blank check before the Set lookup, e.g. `if (normalized == null || !ALLOWED_TOGGLE_STATUSES.contains(normalized)) { throw new EbmsException(\"INVALID_STATUS\", ...); }` - matches the spec's 'throws EbmsException(INVALID_STATUS) for any other value (e.g. FOO, null, blank)'."
+}

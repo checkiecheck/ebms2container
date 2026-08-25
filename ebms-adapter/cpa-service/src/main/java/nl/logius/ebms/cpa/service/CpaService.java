@@ -23,6 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Businesslogica voor CPA-beheer en -opzoekingen.
@@ -34,6 +35,9 @@ import java.util.List;
 @RequiredArgsConstructor
 @Slf4j
 public class CpaService {
+
+    /** Toegestane statuswaarden voor de PATCH-status-toggle (Active/Suspend in het dashboard). */
+    private static final Set<String> ALLOWED_TOGGLE_STATUSES = Set.of("ACTIVE", "SUSPENDED");
 
     private final CpaRepository              cpaRepository;
     private final CpaPartyRepository         partyRepository;
@@ -126,12 +130,60 @@ public class CpaService {
     public CpaDto create(CpaDto dto) {
         if (cpaRepository.existsByCpaId(dto.getCpaId())) {
             throw new EbmsException("CPA_ALREADY_EXISTS",
-                "CPA bestaat al: " + dto.getCpaId() + ". Gebruik update of verwijder eerst.");
+                "CPA bestaat al: " + dto.getCpaId() + ". Gebruik update (PUT) of verwijder eerst.");
         }
         CpaEntity entity = cpaMapper.toEntity(dto);
         CpaEntity saved = cpaRepository.save(entity);
         log.info("CPA aangemaakt: {}", saved.getCpaId());
         return cpaMapper.toDto(saved);
+    }
+
+    /**
+     * Volledige overwrite van een bestaande CPA (description, startDate, endDate, status,
+     * cpaXml). Gebruikt door het admin-dashboard om een geüploade CPA met een duplicaat-ID
+     * te overschrijven i.p.v. te weigeren. Cpa-ID en aanmaakdatum blijven ongewijzigd.
+     */
+    @CacheEvict(value = "cpa-by-id", key = "#cpaId")
+    @Transactional
+    public CpaDto update(String cpaId, CpaDto dto) {
+        CpaEntity entity = cpaRepository.findByCpaId(cpaId)
+            .orElseThrow(() -> new CpaNotFoundException(cpaId));
+
+        if (dto.getVersion() != null) {
+            entity.setVersion(dto.getVersion());
+        }
+        entity.setDescription(dto.getDescription());
+        entity.setStartDate(dto.getStartDate());
+        entity.setEndDate(dto.getEndDate());
+        entity.setCpaXml(dto.getCpaXml());
+        if (dto.getStatus() != null && !dto.getStatus().isBlank()) {
+            entity.setStatus(dto.getStatus());
+        }
+
+        CpaEntity saved = cpaRepository.save(entity);
+        log.info("CPA overschreven: {}", cpaId);
+        return enrichWithDetails(cpaMapper.toDto(saved), saved);
+    }
+
+    /**
+     * Wijzigt uitsluitend de status van een bestaande CPA (bijv. de Active/Suspend-toggle in
+     * het admin-dashboard). Toegestane waarden: {@code ACTIVE}, {@code SUSPENDED}.
+     */
+    @CacheEvict(value = "cpa-by-id", key = "#cpaId")
+    @Transactional
+    public CpaDto updateStatus(String cpaId, String status) {
+        String normalized = status == null ? null : status.trim().toUpperCase();
+        if (normalized == null || !ALLOWED_TOGGLE_STATUSES.contains(normalized)) {
+            throw new EbmsException("INVALID_STATUS",
+                "Status moet ACTIVE of SUSPENDED zijn, ontvangen: " + status);
+        }
+
+        CpaEntity entity = cpaRepository.findByCpaId(cpaId)
+            .orElseThrow(() -> new CpaNotFoundException(cpaId));
+        entity.setStatus(normalized);
+        CpaEntity saved = cpaRepository.save(entity);
+        log.info("CPA-status gewijzigd: {} -> {}", cpaId, normalized);
+        return enrichWithDetails(cpaMapper.toDto(saved), saved);
     }
 
     @CacheEvict(value = "cpa-by-id", key = "#cpaId")

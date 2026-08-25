@@ -117,6 +117,15 @@
         <div id="cpaMeta" data-testid="cpa-meta" class="text-sm text-slate-500">
           Nog geen CPA geladen — upload een bestand of zoek op CPA ID.
         </div>
+        <div id="cpaStatusToggleWrap" data-testid="cpa-status-toggle-wrap"
+          class="hidden mt-4 flex items-center justify-between rounded-md border border-slate-800 bg-slate-950/40 px-4 py-3">
+          <div>
+            <p class="text-xs text-slate-500">Huidige status</p>
+            <p id="cpaCurrentStatusLabel" data-testid="cpa-current-status-label" class="font-medium"></p>
+          </div>
+          <button id="cpaStatusToggleBtn" data-testid="cpa-status-toggle-button"
+            class="px-4 py-2 rounded-md text-sm font-medium transition-colors"></button>
+        </div>
       </div>
     </div>
 
@@ -128,6 +137,30 @@
       </div>
     </div>
   </main>
+
+  <!-- Overschrijf-bevestiging (CPA bestaat al) -->
+  <div id="overwriteModal" data-testid="overwrite-confirm-modal"
+    class="hidden fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-6 z-50">
+    <div class="bg-slate-900 border border-slate-700 rounded-lg max-w-md w-full">
+      <div class="px-5 py-4 border-b border-slate-800">
+        <h2 class="font-semibold text-slate-100">CPA bestaat al</h2>
+      </div>
+      <div class="p-5 text-sm text-slate-300">
+        <p>CPA <span id="overwriteModalCpaId" data-testid="overwrite-modal-cpa-id" class="text-emerald-400 font-medium"></span>
+          bestaat al in cpa-service. Wil je deze overschrijven met het geüploade bestand?</p>
+      </div>
+      <div class="flex justify-end gap-2 px-5 py-4 border-t border-slate-800">
+        <button id="overwriteCancelBtn" data-testid="overwrite-cancel-button"
+          class="px-4 py-2 rounded-md border border-slate-700 hover:bg-slate-800 text-sm transition-colors">
+          Annuleren
+        </button>
+        <button id="overwriteConfirmBtn" data-testid="overwrite-confirm-button"
+          class="px-4 py-2 rounded-md bg-amber-600 hover:bg-amber-500 text-slate-950 font-medium text-sm transition-colors">
+          Overschrijven
+        </button>
+      </div>
+    </div>
+  </div>
 
   <!-- Details modal (berichten) -->
   <div id="detailsModal" data-testid="details-modal" class="hidden fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-6 z-50">
@@ -400,6 +433,81 @@
       el.textContent = message;
     }
 
+    // ── Status-toggle (Active/Suspend) ────────────────────────────────────────
+    let currentCpaDto = null;
+
+    function renderStatusToggle(dto) {
+      currentCpaDto = dto || null;
+      const wrap = document.getElementById('cpaStatusToggleWrap');
+      if (!dto || !dto.cpaId) {
+        wrap.classList.add('hidden');
+        return;
+      }
+      wrap.classList.remove('hidden');
+      const isActive = (dto.status || '').toUpperCase() === 'ACTIVE';
+      const label = document.getElementById('cpaCurrentStatusLabel');
+      label.textContent = dto.status || '-';
+      label.className = `font-medium ${isActive ? 'text-emerald-400' : 'text-amber-400'}`;
+
+      const btn = document.getElementById('cpaStatusToggleBtn');
+      btn.textContent = isActive ? 'Suspenderen' : 'Activeren';
+      btn.className = `px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+        isActive
+          ? 'bg-red-600 hover:bg-red-500 text-slate-950'
+          : 'bg-emerald-600 hover:bg-emerald-500 text-slate-950'}`;
+    }
+
+    document.getElementById('cpaStatusToggleBtn').onclick = async () => {
+      if (!currentCpaDto || !currentCpaDto.cpaId) return;
+      const isActive = (currentCpaDto.status || '').toUpperCase() === 'ACTIVE';
+      const newStatus = isActive ? 'SUSPENDED' : 'ACTIVE';
+      setUploadStatus(`Status wijzigen naar ${newStatus}...`, 'info');
+      try {
+        const res = await fetch(`${CPA_API_URL}/${encodeURIComponent(currentCpaDto.cpaId)}/status`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: newStatus }),
+        });
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(`HTTP ${res.status}: ${text || res.statusText}`);
+        }
+        const saved = await res.json();
+        renderStatusToggle(saved);
+        setUploadStatus(`Status van ${saved.cpaId} gewijzigd naar ${saved.status}.`, 'success');
+      } catch (err) {
+        setUploadStatus(`Status wijzigen mislukt: ${err.message}`, 'error');
+      }
+    };
+
+    // ── Overschrijf-bevestiging (duplicaat-cpaId bij upload) ───────────────────
+    function showOverwriteConfirm(cpaId) {
+      return new Promise((resolve) => {
+        const modal = document.getElementById('overwriteModal');
+        document.getElementById('overwriteModalCpaId').textContent = cpaId;
+        modal.classList.remove('hidden');
+
+        const confirmBtn = document.getElementById('overwriteConfirmBtn');
+        const cancelBtn = document.getElementById('overwriteCancelBtn');
+
+        const cleanup = (result) => {
+          modal.classList.add('hidden');
+          confirmBtn.removeEventListener('click', onConfirm);
+          cancelBtn.removeEventListener('click', onCancel);
+          resolve(result);
+        };
+        const onConfirm = () => cleanup(true);
+        const onCancel = () => cleanup(false);
+
+        confirmBtn.addEventListener('click', onConfirm);
+        cancelBtn.addEventListener('click', onCancel);
+      });
+    }
+
+    document.getElementById('overwriteModal').addEventListener('click', (e) => {
+      if (e.target.id === 'overwriteModal') document.getElementById('overwriteCancelBtn').click();
+    });
+
     function handleCpaFile(file) {
       if (!file) return;
       const reader = new FileReader();
@@ -434,18 +542,38 @@
 
     document.getElementById('cpaUploadBtn').onclick = async () => {
       if (!lastParsedCpa || !lastRawXml) return;
-      setUploadStatus('Uploaden...', 'info');
+      const payload = {
+        cpaId: lastParsedCpa.cpaId,
+        status: mapStatusToBackend(lastParsedCpa.status),
+        startDate: toIsoOrNull(lastParsedCpa.startDate),
+        endDate: toIsoOrNull(lastParsedCpa.endDate),
+        cpaXml: lastRawXml,
+      };
       try {
-        // NB: cpa-service accepteert JSON (CpaDto), geen raw XML content-type.
-        const payload = {
-          cpaId: lastParsedCpa.cpaId,
-          status: mapStatusToBackend(lastParsedCpa.status),
-          startDate: toIsoOrNull(lastParsedCpa.startDate),
-          endDate: toIsoOrNull(lastParsedCpa.endDate),
-          cpaXml: lastRawXml,
-        };
-        const res = await fetch(CPA_API_URL, {
-          method: 'POST',
+        setUploadStatus('Controleren of CPA al bestaat...', 'info');
+        let exists = false;
+        try {
+          const checkRes = await fetch(`${CPA_API_URL}/${encodeURIComponent(payload.cpaId)}`);
+          exists = checkRes.ok;
+        } catch (_) {
+          // Netwerkfout bij de check: ga uit van 'bestaat niet' en laat de POST/PUT het afhandelen.
+        }
+
+        let method = 'POST';
+        let url = CPA_API_URL;
+        if (exists) {
+          const overwrite = await showOverwriteConfirm(payload.cpaId);
+          if (!overwrite) {
+            setUploadStatus('Upload geannuleerd - bestaande CPA niet overschreven.', 'info');
+            return;
+          }
+          method = 'PUT';
+          url = `${CPA_API_URL}/${encodeURIComponent(payload.cpaId)}`;
+        }
+
+        setUploadStatus(exists ? 'Overschrijven...' : 'Uploaden...', 'info');
+        const res = await fetch(url, {
+          method,
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         });
@@ -454,7 +582,9 @@
           throw new Error(`HTTP ${res.status}: ${text || res.statusText}`);
         }
         const saved = await res.json();
-        setUploadStatus(`CPA succesvol opgeslagen (cpaId=${saved.cpaId})`, 'success');
+        renderStatusToggle(saved);
+        setUploadStatus(
+          `CPA succesvol ${exists ? 'overschreven' : 'opgeslagen'} (cpaId=${saved.cpaId})`, 'success');
       } catch (err) {
         setUploadStatus(`Upload mislukt: ${err.message}`, 'error');
       }
@@ -473,6 +603,7 @@
         lastRawXml = dto.cpaXml;
         renderCpaMeta(parsed);
         renderNetworkMap(parsed);
+        renderStatusToggle(dto);
         document.getElementById('cpaUploadBtn').disabled = false;
         setUploadStatus(`CPA ${cpaId} geladen uit cpa-service.`, 'success');
       } catch (err) {

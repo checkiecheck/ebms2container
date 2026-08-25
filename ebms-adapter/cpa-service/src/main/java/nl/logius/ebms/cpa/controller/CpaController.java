@@ -2,6 +2,7 @@ package nl.logius.ebms.cpa.controller;
 
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import nl.logius.ebms.cpa.dto.StatusUpdateRequest;
 import nl.logius.ebms.cpa.entity.PartnerCertificateEntity;
 import nl.logius.ebms.cpa.service.CpaService;
 import nl.logius.ebms.common.model.cpa.CpaDto;
@@ -22,6 +23,8 @@ import java.util.List;
  *   <li>GET  /api/cpa                      – alle CPA's
  *   <li>GET  /api/cpa/{cpaId}              – één CPA op ID (gecached)
  *   <li>POST /api/cpa                      – nieuwe CPA aanmaken
+ *   <li>PUT  /api/cpa/{cpaId}              – bestaande CPA volledig overschrijven
+ *   <li>PATCH /api/cpa/{cpaId}/status      – alleen de status wijzigen (ACTIVE/SUSPENDED)
  *   <li>DELETE /api/cpa/{cpaId}            – CPA verwijderen
  *   <li>GET  /api/cpa/{cpaId}/parties      – partijen per CPA
  *   <li>GET  /api/cpa/parties/oin/{oin}    – partijen per OIN
@@ -50,6 +53,24 @@ public class CpaController {
     @PostMapping
     public ResponseEntity<CpaDto> create(@Valid @RequestBody CpaDto dto) {
         return ResponseEntity.status(HttpStatus.CREATED).body(cpaService.create(dto));
+    }
+
+    /**
+     * Volledige overwrite van een bestaande CPA. Gebruikt door het admin-dashboard's
+     * "Overschrijf-prompt" wanneer een geüploade CPA XML een duplicaat-cpaId heeft.
+     */
+    @PutMapping("/{cpaId}")
+    public ResponseEntity<CpaDto> update(@PathVariable String cpaId, @Valid @RequestBody CpaDto dto) {
+        return ResponseEntity.ok(cpaService.update(cpaId, dto));
+    }
+
+    /**
+     * Wijzigt uitsluitend de status van een CPA (Active/Suspend-toggle in het admin-dashboard).
+     */
+    @PatchMapping("/{cpaId}/status")
+    public ResponseEntity<CpaDto> updateStatus(@PathVariable String cpaId,
+                                                @RequestBody StatusUpdateRequest request) {
+        return ResponseEntity.ok(cpaService.updateStatus(cpaId, request.getStatus()));
     }
 
     @DeleteMapping("/{cpaId}")

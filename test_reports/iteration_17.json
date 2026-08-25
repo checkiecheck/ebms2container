@@ -1,0 +1,31 @@
+{
+  "summary": "Retest of iteration_16 HIGH-priority bug fix in cpa-service. Both fixes verified: (1) CpaService.updateStatus(null) now throws EbmsException(INVALID_STATUS) instead of NPE, and controller returns HTTP 400; (2) CpaService.update() preserves entity.version when dto.getVersion() is null. Added regression test update_nullVersion_preservesExistingVersion. Full cpa-service non-Testcontainers suite green.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/ebms-adapter/cpa-service/src/test/java/nl/logius/ebms/cpa/service/CpaServiceUpdateTest.java",
+    "/app/ebms-adapter/cpa-service/src/test/java/nl/logius/ebms/cpa/controller/CpaControllerUpdateTest.java",
+    "/app/ebms-adapter/cpa-service/target/surefire-reports/"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Both fixes are minimal and idiomatic - explicit null-check before Set.contains() and dto.getVersion() null-guard mirror the existing pattern used for dto.getStatus(). No further comments."
+  ],
+  "updated_files": [
+    "/app/ebms-adapter/cpa-service/src/test/java/nl/logius/ebms/cpa/service/CpaServiceUpdateTest.java (added update_nullVersion_preservesExistingVersion regression test)"
+  ],
+  "success_rate": {"backend": "100% (17/17 non-Testcontainers tests)", "frontend": "not tested (per request)"},
+  "test_credentials": "N/A",
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "JDK 21.0.2 at /tmp/jdk-21.0.2, Maven 3.9.9 at /tmp/apache-maven-3.9.9. Build command: `cd /app/ebms-adapter && mvn -pl cpa-service -am install -DskipTests` then `cd cpa-service && mvn test -Dtest='!CpaServiceIntegrationTest'`. CpaServiceIntegrationTest requires Docker/Testcontainers which is unavailable in this sandbox (Docker environment error) - exclude it. Iteration_16 HIGH-priority bug FIXED and verified. Tests: CpaServiceUpdateTest now has 10 tests (added version-preservation test), CpaControllerUpdateTest has 6 tests - all pass.",
+  "rca of the issue": "RCA (iteration_16 bug): `Set.of(...)` returns Java's ImmutableCollections$Set which throws NPE on .contains(null). Reproduction: CpaService.updateStatus(id, null) -> normalized=null -> Set.contains(null) -> NPE -> HTTP 500 instead of 400. Mitigation: explicit `if (normalized == null || !ALLOWED_TOGGLE_STATUSES.contains(normalized))` guard on line 176 of CpaService.java. Verified via CpaServiceUpdateTest.updateStatus_null_throwsEbmsException (asserts EbmsException + INVALID_STATUS errorCode) and CpaControllerUpdateTest (asserts HTTP 400 + ProblemDetail body). Second minor fix on update() line 152 wraps entity.setVersion(dto.getVersion()) in `if (dto.getVersion() != null)` to preserve existing version - covered by new regression test."
+}
