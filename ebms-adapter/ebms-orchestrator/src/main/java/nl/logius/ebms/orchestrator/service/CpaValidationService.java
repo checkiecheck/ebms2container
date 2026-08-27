@@ -109,32 +109,46 @@ public class CpaValidationService {
      * @return {@link DeliveryChannelDto} met endpoint-URL, DK-profiel en RM-parameters
      * @throws EbmsException als het kanaal niet gevonden wordt of de service onbereikbaar is
      */
-    public DeliveryChannelDto getDeliveryChannel(String cpaId, String toPartyId) {
-        log.debug("[CPA] Afleverkanaal opzoeken: cpaId={} toPartyId={}", cpaId, toPartyId);
-        try {
-            DeliveryChannelDto channel = cpaRestClient.get()
-                .uri("/api/cpa/{cpaId}/channels/{partyId}", cpaId, toPartyId)
-                .retrieve()
-                .body(DeliveryChannelDto.class);
+public DeliveryChannelDto getDeliveryChannel(String cpaId, String toPartyId) {
+    log.debug("[CPA] Afleverkanaal opzoeken: cpaId={} toPartyId={}", cpaId, toPartyId);
+    try {
+        DeliveryChannelDto channel = cpaRestClient.get()
+            .uri("/api/cpa/{cpaId}/channels/{partyId}", cpaId, toPartyId)
+            .retrieve()
+            .body(DeliveryChannelDto.class);
 
-            if (channel == null || channel.getEndpointUrl() == null) {
-                throw new EbmsException("CHANNEL_NOT_FOUND",
-                    "Geen geldig afleverkanaal voor CPA=" + cpaId + " party=" + toPartyId);
-            }
-            log.debug("[CPA] Afleverkanaal gevonden: {}", channel.getEndpointUrl());
-            return channel;
-
-        } catch (HttpClientErrorException.NotFound e) {
+        if (channel == null || channel.getEndpointUrl() == null) {
             throw new EbmsException("CHANNEL_NOT_FOUND",
-                "Afleverkanaal niet gevonden: CPA=" + cpaId + " party=" + toPartyId);
-        } catch (EbmsException e) {
-            throw e;
-        } catch (Exception e) {
-            log.error("[CPA] cpa-service onbereikbaar bij kanaal-lookup: {}", e.getMessage());
-            throw new EbmsException("CPA_SERVICE_UNAVAILABLE",
-                "cpa-service onbereikbaar voor kanaal-lookup: " + e.getMessage());
+                "Geen geldig afleverkanaal voor CPA=" + cpaId + " party=" + toPartyId);
         }
+        log.debug("[CPA] Afleverkanaal gevonden: {}", channel.getEndpointUrl());
+        return channel;
+
+    } catch (HttpClientErrorException.NotFound e) {
+        // Vangt de formele 404 op (als de CPA zelf of het endpoint onvindbaar is)
+        throw new EbmsException("CHANNEL_NOT_FOUND",
+            "Afleverkanaal niet gevonden (404): CPA=" + cpaId + " party=" + toPartyId);
+            
+    } catch (HttpClientErrorException.BadRequest e) {
+        // FIX: Dit vangt de HTTP 400 op die de cpa-service teruggeeft bij CHANNEL_NOT_FOUND!
+        throw new EbmsException("CHANNEL_NOT_FOUND",
+            "Afleverkanaal niet geconfigureerd in CPA (400): CPA=" + cpaId + " party=" + toPartyId);
+            
+    } catch (HttpClientErrorException e) {
+        // Vangt eventuele andere 4xx fouten op (zoals 401 of 403)
+        throw new EbmsException("CHANNEL_NOT_FOUND",
+            "Client-fout bij CPA-lookup (" + e.getStatusCode() + "): " + e.getMessage());
+            
+    } catch (EbmsException e) {
+        throw e;
+        
+    } catch (Exception e) {
+        // Dit blok wordt nu ALLEEN nog maar bereikt als de cpa-service écht offline is (bijv. netwerkfout of 500 error)
+        log.error("[CPA] cpa-service onbereikbaar bij kanaal-lookup: {}", e.getMessage());
+        throw new EbmsException("CPA_SERVICE_UNAVAILABLE",
+            "cpa-service onbereikbaar voor kanaal-lookup: " + e.getMessage());
     }
+}
 
     /**
      * Haalt de geldige (niet-verlopen) partnercertificaten op voor een CPA-partij.
