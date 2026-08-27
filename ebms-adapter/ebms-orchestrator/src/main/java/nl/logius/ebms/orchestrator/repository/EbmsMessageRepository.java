@@ -33,10 +33,13 @@ public interface EbmsMessageRepository extends JpaRepository<EbmsMessageEntity, 
     /** Admin message-monitor: optioneel filteren op richting (INBOUND/OUTBOUND). */
     Page<EbmsMessageEntity> findByDirection(MessageDirection direction, Pageable pageable);
 
-    /** Berichten die opnieuw geprobeerd moeten worden (rm-profielen). */
+    /** Berichten die opnieuw geprobeerd moeten worden (rm-profielen). Alleen OUTBOUND: inbound
+     *  berichten hebben geen zender-initieerbare "retry" - die zou de sender zelf opnieuw
+     *  moeten aanleveren conform ebXML Reliable Messaging. */
     @Query("""
         SELECT m FROM EbmsMessageEntity m
         WHERE m.status = 'FAILED'
+          AND m.direction = 'OUTBOUND'
           AND m.retryCount < :maxRetries
           AND (m.lastRetryAt IS NULL OR m.lastRetryAt < :retryBefore)
         """)
@@ -54,16 +57,21 @@ public interface EbmsMessageRepository extends JpaRepository<EbmsMessageEntity, 
     List<EbmsMessageEntity> findExpiredMessages(@Param("now") Instant now);
 
     /**
-     * Watchdog: berichten die langer dan de threshold vaststaan op PROCESSING (bijv. door een
-     * gecrashte verwerkingsthread of ontbrekende AMQP-ack), gebruikt door
-     * {@code MessageStatusReconciliationScheduler}. {@code updatedAt} wordt gebruikt (niet het
-     * ebXML {@code timestamp}-veld) omdat dat betrouwbaar het moment markeert waarop de rij
-     * voor het laatst is bijgewerkt (incl. de overgang naar PROCESSING).
+     * Watchdog: berichten van een bepaalde richting die langer dan de threshold vaststaan op
+     * PROCESSING, gebruikt door {@code MessageStatusReconciliationScheduler}. Per-richting
+     * omdat OUTBOUND en INBOUND een andere normale doorlooptijd hebben (INBOUND kan legitiem
+     * langer op PROCESSING staan in afwachting van een downstream-consument op de
+     * {@code ebms.inbound.messages} queue). {@code updatedAt} wordt gebruikt (niet het ebXML
+     * {@code timestamp}-veld) omdat dat betrouwbaar het moment markeert waarop de rij voor het
+     * laatst is bijgewerkt (incl. de overgang naar PROCESSING).
      */
     @Query("""
         SELECT m FROM EbmsMessageEntity m
         WHERE m.status = 'PROCESSING'
+          AND m.direction = :direction
           AND m.updatedAt < :threshold
         """)
-    List<EbmsMessageEntity> findStuckProcessingMessages(@Param("threshold") Instant threshold);
+    List<EbmsMessageEntity> findStuckProcessingMessages(
+        @Param("direction") MessageDirection direction,
+        @Param("threshold") Instant threshold);
 }

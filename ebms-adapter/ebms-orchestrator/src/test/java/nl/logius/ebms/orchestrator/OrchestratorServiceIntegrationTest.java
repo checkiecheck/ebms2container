@@ -85,6 +85,7 @@ class OrchestratorServiceIntegrationTest {
     @Test
     void retryFailedMessages_failedMessageWithinRetryLimit_statusChangedToProcessing() {
         EbmsMessageEntity failedMsg = buildMessage("msg-retry-001");
+        failedMsg.setDirection(MessageDirection.OUTBOUND);
         failedMsg.setStatus(MessageStatus.FAILED);
         failedMsg.setRetryCount((short) 1);
         failedMsg.setLastRetryAt(Instant.now().minusSeconds(300));
@@ -100,6 +101,7 @@ class OrchestratorServiceIntegrationTest {
     @Test
     void retryFailedMessages_maxRetriesReached_isSkipped() {
         EbmsMessageEntity maxRetried = buildMessage("msg-maxretry-001");
+        maxRetried.setDirection(MessageDirection.OUTBOUND);
         maxRetried.setStatus(MessageStatus.FAILED);
         maxRetried.setRetryCount((short) 3); // maxRetries=3, dus niet opnieuw
         maxRetried.setLastRetryAt(Instant.now().minusSeconds(300));
@@ -110,6 +112,23 @@ class OrchestratorServiceIntegrationTest {
         EbmsMessageEntity unchanged = messageRepository.findByMessageId("msg-maxretry-001").orElseThrow();
         assertThat(unchanged.getStatus()).isEqualTo(MessageStatus.FAILED);
         assertThat(unchanged.getRetryCount()).isEqualTo((short) 3);
+    }
+
+    @Test
+    void retryFailedMessages_inboundDirection_isNeverRetried() {
+        // INBOUND FAILED berichten mogen NOOIT als outbound-retry-kandidaat gekozen worden
+        // (regressie-test voor de bug: inbound werd voorheen ten onrechte als outbound behandeld).
+        EbmsMessageEntity inboundFailed = buildMessage("msg-inbound-failed-001");
+        inboundFailed.setDirection(MessageDirection.INBOUND);
+        inboundFailed.setStatus(MessageStatus.FAILED);
+        inboundFailed.setRetryCount((short) 0);
+        messageRepository.save(inboundFailed);
+
+        orchestratorService.retryFailedMessages();
+
+        EbmsMessageEntity unchanged = messageRepository.findByMessageId("msg-inbound-failed-001").orElseThrow();
+        assertThat(unchanged.getStatus()).isEqualTo(MessageStatus.FAILED);
+        assertThat(unchanged.getRetryCount()).isEqualTo((short) 0);
     }
 
     // ── TTL-expiry ────────────────────────────────────────────────────────────
@@ -145,6 +164,7 @@ class OrchestratorServiceIntegrationTest {
     @Test
     void findMessagesForRetry_neverRetried_isCandidate() {
         EbmsMessageEntity neverRetried = buildMessage("msg-newretry-001");
+        neverRetried.setDirection(MessageDirection.OUTBOUND);
         neverRetried.setStatus(MessageStatus.FAILED);
         neverRetried.setRetryCount((short) 0);
         // lastRetryAt = null → altijd kandidaat
@@ -156,6 +176,22 @@ class OrchestratorServiceIntegrationTest {
         assertThat(candidates)
             .extracting(EbmsMessageEntity::getMessageId)
             .contains("msg-newretry-001");
+    }
+
+    @Test
+    void findMessagesForRetry_inboundDirection_isNeverCandidate() {
+        EbmsMessageEntity inboundFailed = buildMessage("msg-newretry-inbound-001");
+        inboundFailed.setDirection(MessageDirection.INBOUND);
+        inboundFailed.setStatus(MessageStatus.FAILED);
+        inboundFailed.setRetryCount((short) 0);
+        messageRepository.save(inboundFailed);
+
+        List<EbmsMessageEntity> candidates = messageRepository.findMessagesForRetry(
+            3, Instant.now());
+
+        assertThat(candidates)
+            .extracting(EbmsMessageEntity::getMessageId)
+            .doesNotContain("msg-newretry-inbound-001");
     }
 
     @Test

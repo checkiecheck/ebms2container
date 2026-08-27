@@ -99,7 +99,10 @@ ebms:
     enforce-inbound-oin-validation: ${EBMS_ENFORCE_INBOUND_OIN_VALIDATION:true}
   watchdog:
     # Reconciliator: markeert berichten die langer dan deze timeout vaststaan op PROCESSING als FAILED
+    # OUTBOUND (kortere timeout - crash tijdens verzending is vrijwel zeker de oorzaak)
     stuck-processing-timeout-minutes: ${EBMS_WATCHDOG_TIMEOUT_MINUTES:5}
+    # INBOUND (langere timeout - kan legitiem wachten op een downstream-consument)
+    inbound-stuck-processing-timeout-minutes: ${EBMS_WATCHDOG_INBOUND_TIMEOUT_MINUTES:30}
     check-interval-ms: ${EBMS_WATCHDOG_CHECK_INTERVAL_MS:300000}
 
 # ── Actuator / health ─────────────────────────────────────────────────────────

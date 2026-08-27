@@ -1,6 +1,7 @@
 package nl.logius.ebms.orchestrator.scheduler;
 
 import nl.logius.ebms.orchestrator.entity.EbmsMessageEntity;
+import nl.logius.ebms.orchestrator.entity.MessageDirection;
 import nl.logius.ebms.orchestrator.entity.MessageStatus;
 import nl.logius.ebms.orchestrator.repository.EbmsMessageRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -21,6 +22,8 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -28,10 +31,11 @@ import static org.mockito.Mockito.when;
 
 /**
  * Focused Mockito unit test for {@link MessageStatusReconciliationScheduler}:
- *  - threshold = now - stuck-processing-timeout-minutes
- *  - stuck entities are marked FAILED with a non-null errorMessage
- *  - saveAll() called exactly once with the collected list
- *  - noop (no saveAll) when repository returns empty list
+ *  - OUTBOUND uses threshold = now - stuck-processing-timeout-minutes (default 5)
+ *  - INBOUND uses a separate, longer threshold = now - inbound-stuck-processing-timeout-minutes (default 30)
+ *  - stuck entities (either direction) are marked FAILED with a non-null errorMessage
+ *  - saveAll() called per direction that has stuck entities
+ *  - noop (no saveAll) when repository returns empty list for both directions
  */
 @ExtendWith(MockitoExtension.class)
 class MessageStatusReconciliationSchedulerTest {
@@ -43,22 +47,23 @@ class MessageStatusReconciliationSchedulerTest {
     @BeforeEach
     void setUp() {
         ReflectionTestUtils.setField(scheduler, "stuckProcessingTimeoutMinutes", 5);
+        ReflectionTestUtils.setField(scheduler, "inboundStuckProcessingTimeoutMinutes", 30);
+        lenient().when(repo.findStuckProcessingMessages(any(), any())).thenReturn(Collections.emptyList());
     }
 
     @Test
-    @DisplayName("stuck entities => marked FAILED with errorMessage, saveAll called once, threshold ~ now-5min")
-    void marksStuckAsFailedAndSaves() {
+    @DisplayName("outbound: stuck entities => marked FAILED with errorMessage, saveAll called, threshold ~ now-5min")
+    void outbound_marksStuckAsFailedAndSaves() {
         EbmsMessageEntity a = mkEntity("m-A");
         EbmsMessageEntity b = mkEntity("m-B");
         ArgumentCaptor<Instant> thresholdCap = ArgumentCaptor.forClass(Instant.class);
-        when(repo.findStuckProcessingMessages(thresholdCap.capture()))
+        when(repo.findStuckProcessingMessages(eq(MessageDirection.OUTBOUND), thresholdCap.capture()))
             .thenReturn(List.of(a, b));
 
         Instant before = Instant.now();
         scheduler.reconcileStuckProcessingMessages();
         Instant after = Instant.now();
 
-        // Threshold should be roughly now - 5 minutes.
         Instant threshold = thresholdCap.getValue();
         assertThat(threshold).isAfterOrEqualTo(before.minus(5, ChronoUnit.MINUTES).minusSeconds(2));
         assertThat(threshold).isBeforeOrEqualTo(after.minus(5, ChronoUnit.MINUTES).plusSeconds(2));
@@ -75,10 +80,28 @@ class MessageStatusReconciliationSchedulerTest {
     }
 
     @Test
-    @DisplayName("empty repository result => saveAll NEVER called (noop)")
-    void emptyResult_isNoop() {
-        when(repo.findStuckProcessingMessages(any())).thenReturn(Collections.emptyList());
+    @DisplayName("inbound: uses the separate, longer inbound threshold (~now-30min) and a downstream-consumer hint")
+    void inbound_usesSeparateLongerThreshold() {
+        EbmsMessageEntity c = mkEntity("m-C");
+        ArgumentCaptor<Instant> thresholdCap = ArgumentCaptor.forClass(Instant.class);
+        when(repo.findStuckProcessingMessages(eq(MessageDirection.INBOUND), thresholdCap.capture()))
+            .thenReturn(List.of(c));
 
+        Instant before = Instant.now();
+        scheduler.reconcileStuckProcessingMessages();
+        Instant after = Instant.now();
+
+        Instant threshold = thresholdCap.getValue();
+        assertThat(threshold).isAfterOrEqualTo(before.minus(30, ChronoUnit.MINUTES).minusSeconds(2));
+        assertThat(threshold).isBeforeOrEqualTo(after.minus(30, ChronoUnit.MINUTES).plusSeconds(2));
+
+        assertThat(c.getStatus()).isEqualTo(MessageStatus.FAILED);
+        assertThat(c.getErrorMessage()).contains("downstream-consument");
+    }
+
+    @Test
+    @DisplayName("empty repository result for both directions => saveAll NEVER called (noop)")
+    void emptyResult_isNoop() {
         scheduler.reconcileStuckProcessingMessages();
 
         verify(repo, never()).saveAll(any());

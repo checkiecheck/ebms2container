@@ -9,7 +9,11 @@ import nl.logius.ebms.common.model.amqp.AuditEvent;
 import nl.logius.ebms.common.model.amqp.EbmsInboundMessage;
 import nl.logius.ebms.common.model.amqp.EbmsAckEvent;
 import nl.logius.ebms.common.model.amqp.EbmsOutboundMessage;
+import nl.logius.ebms.common.model.ebxml.AckRequested;
 import nl.logius.ebms.common.model.ebxml.EbxmlMessageHeader;
+import nl.logius.ebms.common.model.ebxml.MessageInfo;
+import nl.logius.ebms.common.model.ebxml.PartyId;
+import nl.logius.ebms.common.model.ebxml.ServiceType;
 import nl.logius.ebms.orchestrator.config.RabbitMqConfig;
 import nl.logius.ebms.orchestrator.config.RetryProperties;
 import nl.logius.ebms.orchestrator.entity.EbmsMessageEntity;
@@ -234,7 +238,10 @@ public class OrchestratorService {
     /**
      * Reliable Messaging retry-scheduler.
      *
-     * <p>Herneemt het verzenden van FAILED berichten die nog retrypogingen over hebben.
+     * <p>Herneemt het verzenden van FAILED OUTBOUND berichten die nog retrypogingen over
+     * hebben (INBOUND berichten worden hier bewust uitgesloten - zie
+     * {@link EbmsMessageRepository#findMessagesForRetry}: een inbound-bericht heeft geen
+     * zender-initieerbare "retry" op de orchestrator zelf).
      * Interval: configureerbaar via {@code ebms.reliable-messaging.retry-check-interval-ms}.
      */
     @Scheduled(fixedDelayString = "${ebms.reliable-messaging.retry-check-interval-ms:300000}")
@@ -261,6 +268,9 @@ public class OrchestratorService {
 
                 EbmsOutboundMessage retryMsg = EbmsOutboundMessage.builder()
                     .messageId(msg.getMessageId())
+                    .header(buildRetryHeader(msg))
+                    .payloadRef(msg.getPayloadRef())
+                    .payloadContentType(msg.getPayloadContentType())
                     .scheduledAt(Instant.now())
                     .build();
                 rabbitTemplate.convertAndSend(
@@ -276,6 +286,35 @@ public class OrchestratorService {
                     msg.getMessageId(), e.getMessage());
             }
         }
+    }
+
+    /**
+     * Reconstrueert een {@link EbxmlMessageHeader} uit een gepersisteerd OUTBOUND bericht, zodat
+     * {@code OutboundMessageService} de SOAP-envelop bij een herpoging opnieuw kan opbouwen (en
+     * indien het profiel dat vereist opnieuw kan ondertekenen/versleutelen). Zonder deze
+     * reconstructie ontbreekt de header en wordt de herpoging door {@code OutboundMessageService}
+     * direct als ongeldig bericht verworpen.
+     */
+    private EbxmlMessageHeader buildRetryHeader(EbmsMessageEntity msg) {
+        return EbxmlMessageHeader.builder()
+            .cpaId(msg.getCpaId())
+            .conversationId(msg.getConversationId())
+            .from(List.of(PartyId.builder()
+                .value(msg.getFromPartyId()).type(msg.getFromPartyType()).build()))
+            .fromRole(msg.getFromRole())
+            .to(List.of(PartyId.builder()
+                .value(msg.getToPartyId()).type(msg.getToPartyType()).build()))
+            .toRole(msg.getToRole())
+            .service(ServiceType.builder()
+                .value(msg.getService()).type(msg.getServiceType()).build())
+            .action(msg.getAction())
+            .messageInfo(MessageInfo.builder()
+                .messageId(msg.getMessageId())
+                .timestamp(msg.getTimestamp())
+                .refToMessageId(msg.getRefToMessageId())
+                .build())
+            .ackRequested(msg.isAckRequested() ? AckRequested.builder().build() : null)
+            .build();
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────

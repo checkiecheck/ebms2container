@@ -506,6 +506,31 @@ overbodig — in plaats daarvan volledige auto-sync, net als bij partijen.
   test-scoped BouncyCastle, 33 regressie herverifieerd). Geen kritieke issues. Testcontainers
   nog niet beschikbaar in sandbox (bekende restrictie, pre-existing).
 
+### Bugfix: inbound-berichten ten onrechte via outbound-retry geloopt (voltooid – augustus 2026)
+
+Gebruiker meldde vanuit eigen testomgeving (karavan-db/RabbitMQ, buiten deze sandbox): een
+INBOUND bericht dat vastzat op PROCESSING liep elke ~10 minuten in een eindeloze foutloop
+(watchdog → FAILED → retry → outbound-afwijzing "ontbrekende header" → watchdog vangt opnieuw).
+3 grondoorzaken gevonden en alle 3 gefixt (gebruikerskeuze: volledige scope):
+- [x] `EbmsMessageRepository.findMessagesForRetry()` filterde nooit op `direction` – INBOUND
+  FAILED-rijen werden als OUTBOUND-retry-kandidaat behandeld. Nu `AND m.direction = 'OUTBOUND'`.
+- [x] `OrchestratorService.retryFailedMessages()` bouwde een `EbmsOutboundMessage` met alleen
+  `messageId`+`scheduledAt` (geen header) – zelfs een legitieme OUTBOUND-retry werd daardoor
+  altijd afgewezen. Nieuwe `buildRetryHeader()` reconstrueert de volledige `EbxmlMessageHeader`
+  (partijen, service/actie, messageInfo, ackRequested) uit de gepersisteerde entity.
+- [x] `MessageStatusReconciliationScheduler` gebruikte één 5-min-threshold voor beide richtingen.
+  Er is nog geen `@RabbitListener` op de `ebms.inbound.messages` queue (bevestigd via grep) –
+  INBOUND kan dus legitiem langer op PROCESSING staan. Nieuwe aparte, langere threshold
+  `ebms.watchdog.inbound-stuck-processing-timeout-minutes` (standaard 30 min).
+- **Bekende, bewust niet meegenomen productgap:** er is nog geen consument voor
+  `ebms.inbound.messages` (bijv. de nog te bouwen auditor-service) – los werkitem.
+- **Testing_agent verificatie (geslaagd):** 28/28 non-Docker unit tests groen (incl. 4 nieuwe
+  gerichte tests voor header-reconstructie via `ArgumentCaptor` op `RabbitTemplate`, 3 herschreven
+  watchdog-tests). Testcontainers-tests (3) nog niet uitvoerbaar in sandbox (bekende restrictie).
+- Losstaand gevonden (niet gerelateerd): gebruikers eigen bash-testscript publiceerde outbound
+  test-berichten naar het verkeerde exchange/routing-key (`amq.default`+`ebms.outbound` i.p.v.
+  `ebms.exchange`+`outbound`) – gebruiker fixt dit zelf in het testscript, geen app-wijziging.
+
 ### P0 – Fase 4: auditor-service (NIEUW)
 - [ ] Aparte Spring Boot microservice op poort 8083 voor append-only audit-events
 - [ ] Verwerkt `AuditEvent` AMQP-berichten van orchestrator en crypto-service
