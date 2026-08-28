@@ -27,11 +27,22 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.interceptor.TransactionAspectSupport;
 
 import java.time.Instant;
+import java.util.Set;
 
+/**
+ * Asynchrone AMQP-consument voor uitgaande ebMS2-berichten.
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class OutboundMessageService {
+
+    // Foutcodes die niet hersteld kunnen worden door opnieuw te proberen (geen requeue)
+    private static final Set<String> NON_RETRYABLE_ERROR_CODES = Set.of(
+            "CHANNEL_NOT_FOUND",
+            "INVALID_HEADER",
+            "CPA_NOT_FOUND"
+    );
 
     private final EbmsMessageRepository messageRepository;
     private final CpaChannelCacheService cpaChannelCacheService;
@@ -42,6 +53,8 @@ public class OutboundMessageService {
 
     @Value("${ebms.outbound.signing-key-alias:signing-key}")
     private String defaultSigningKeyAlias;
+
+    // ── AMQP Listener ─────────────────────────────────────────────────────────
 
     @RabbitListener(queues = RabbitMqConfig.QUEUE_OUTBOUND)
     @Transactional
@@ -57,36 +70,43 @@ public class OutboundMessageService {
             EbxmlMessageHeader header = message.getHeader();
             if (header == null || header.getCpaId() == null) {
                 log.error("[OUTBOUND] Ongeldig bericht: messageId={} – ontbrekende header", messageId);
-                nack(amqpChannel, deliveryTag, false);
+                nack(amqpChannel, deliveryTag, false); // Gooi weg / stuur naar DLQ
                 return;
             }
 
             String cpaId = header.getCpaId();
             String toPartyId = extractToPartyId(header);
 
+            // ── 1. Afleverkanaal ophalen (gecached via CpaChannelCacheService) ─
             DeliveryChannelDto channel = cpaChannelCacheService.getChannel(cpaId, toPartyId);
             EbxmlProfile profile = EbxmlProfile.fromCode(channel.getDkProfile());
             boolean requireAck = profile.hasReliableMessaging();
 
+            // ── 2. SOAP-envelop opbouwen ──────────────────────────────────
             SOAPMessage soapMsg = soapHelper.buildOutboundSoap(header, requireAck);
             String rawSoapXml = soapHelper.soapToString(soapMsg);
 
+            // ── 3. Signing (indien vereist door profiel) ───────────────────
             if (profile.requiresSigning()) {
                 String signingAlias = defaultSigningKeyAlias;
                 log.debug("[OUTBOUND] Signing: messageId={} alias={}", messageId, signingAlias);
                 rawSoapXml = cryptoServiceClient.sign(rawSoapXml, signingAlias, messageId);
             }
 
+            // ── 4. Encryptie (indien vereist door profiel) ─────────────────
             if (profile.requiresEncryption()) {
                 String recipientAlias = toPartyId;
                 log.debug("[OUTBOUND] Versleutelen: messageId={} recipient={}", messageId, recipientAlias);
                 rawSoapXml = cryptoServiceClient.encrypt(rawSoapXml, recipientAlias, messageId);
             }
 
+            // ── 5. Persisteer bericht in database (status=PROCESSING) ──────
             EbmsMessageEntity entity = persistOutboundMessage(message, header, rawSoapXml, channel);
 
+            // ── 6. Versturen via CXF SOAP-client ──────────────────────────
             outboundSoapClient.send(channel.getEndpointUrl(), rawSoapXml, cpaId, toPartyId);
 
+            // ── 7. Status-machine bijwerken ────────────────────────────────
             if (requireAck) {
                 entity.setStatus(MessageStatus.SENT);
                 entity.setAckRequested(true);
@@ -97,6 +117,7 @@ public class OutboundMessageService {
             }
             messageRepository.save(entity);
 
+            // ── 8. Audit-event publiceren ──────────────────────────────────
             publishAudit(AuditEvent.builder()
                 .eventType("MESSAGE_SENT")
                 .messageId(messageId)
@@ -106,20 +127,31 @@ public class OutboundMessageService {
                 .result("SUCCESS")
                 .build());
 
+            // ── 9. AMQP ACK ───────────────────────────────────────────────
             ack(amqpChannel, deliveryTag);
 
         } catch (EbmsException e) {
             log.error("[OUTBOUND] EbmsException: messageId={} code={} msg={}",
                 messageId, e.getErrorCode(), e.getMessage());
+            
             TransactionAspectSupport.currentTransactionStatus().setRollbackOnly();
-            nack(amqpChannel, deliveryTag, true);
+            
+            // Requeue alleen als de fout herstelbaar is (niet bij ontbrekend kanaal of ongeldige data)
+            boolean requeue = !NON_RETRYABLE_ERROR_CODES.contains(e.getErrorCode());
+            if (!requeue) {
+                log.warn("[OUTBOUND] Niet-herstelbare fout voor messageId={}. Bericht wordt niet opnieuw aangeboden.", messageId);
+            }
+            
+            nack(amqpChannel, deliveryTag, requeue);
 
         } catch (Exception e) {
             log.error("[OUTBOUND] Onverwachte fout: messageId={}", messageId, e);
             TransactionAspectSupport.currentTransactionStatus().setRollbackOnly();
-            nack(amqpChannel, deliveryTag, true);
+            nack(amqpChannel, deliveryTag, true); // Requeue bij onverwachte technische/systeemfouten
         }
     }
+
+    // ── Interne helpers ───────────────────────────────────────────────────────
 
     private EbmsMessageEntity persistOutboundMessage(
             EbmsOutboundMessage message,
