@@ -8,8 +8,8 @@ import nl.logius.ebms.common.exception.EbmsException;
 import nl.logius.ebms.common.model.amqp.AuditEvent;
 import nl.logius.ebms.common.model.amqp.EbmsOutboundMessage;
 import nl.logius.ebms.common.model.cpa.DeliveryChannelDto;
-import nl.logius.ebms.common.model.ebxml.EbxmlMessageHeader;
-import nl.logius.ebms.common.model.ebxml.EbxmlProfile;
+import nl.logius.ebxml.EbxmlMessageHeader;
+import nl.logius.ebxml.EbxmlProfile;
 import nl.logius.ebms.orchestrator.config.RabbitMqConfig;
 import nl.logius.ebms.orchestrator.entity.EbmsMessageEntity;
 import nl.logius.ebms.orchestrator.entity.MessageDirection;
@@ -17,6 +17,7 @@ import nl.logius.ebms.orchestrator.entity.MessageStatus;
 import nl.logius.ebms.orchestrator.repository.EbmsMessageRepository;
 import nl.logius.ebms.orchestrator.soap.OutboundSoapClient;
 import nl.logius.ebms.orchestrator.soap.SoapHelper;
+import nl.logius.ebms.orchestrator.client.CryptoServiceClient;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.amqp.support.AmqpHeaders;
 import org.springframework.beans.factory.annotation.Value;
@@ -26,232 +27,238 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.interceptor.TransactionAspectSupport;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 
+import java.io.IOException;
 import java.time.Instant;
 
 /**
  * Asynchrone AMQP-consument voor uitgaande ebMS2-berichten.
- *
- * <p>Luistert op de {@code ebms.outbound.messages} queue en implementeert de
- * volledige crypto- en verzend-pipeline:
- * <ol>
- *   <li>CPA + afleverkanaal opzoeken (gecached)</li>
- *   <li>Signing (bij profielen: osb-be-s, osb-rm-s, osb-be-e, osb-rm-e)</li>
- *   <li>Encryptie (bij profielen: osb-be-e, osb-rm-e)</li>
- *   <li>Verzenden via {@link OutboundSoapClient} (CXF Dispatch)</li>
- *   <li>Status-machine: BE→DELIVERED, RM→SENT (wacht op ACK)</li>
- * </ol>
- *
- * <p>Reliable Messaging status-machine:
- * <ul>
- *   <li>Best Effort (osb-be, osb-be-s, osb-be-e): HTTP 200 → {@code DELIVERED}</li>
- *   <li>Reliable Messaging (osb-rm, osb-rm-s, osb-rm-e): HTTP 200 → {@code SENT}
- *       (definitief DELIVERED pas na ontvangst ACK via {@link OrchestratorService#handleAcknowledgment})</li>
- *   <li>Bij fout: nack → retry via RabbitMQ of scheduler → FAILED na maxRetries</li>
- * </ul>
+ * Bevat de volledige crypto- en verzend-pipeline met robuuste foutafhandeling
+ * en bescherming tegen "poison pill" requeue loops.
  */
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class OutboundMessageService {
 
-    private final EbmsMessageRepository messageRepository;
+    private final EbmsMessageRepository ebmsMessageRepository;
+    private final OutboundSoapClient outboundSoapClient;
+    private final CryptoServiceClient cryptoServiceClient;
     private final CpaChannelCacheService cpaChannelCacheService;
-    private final CryptoServiceClient   cryptoServiceClient;
-    private final OutboundSoapClient    outboundSoapClient;
-    private final SoapHelper            soapHelper;
-    private final RabbitTemplate        rabbitTemplate;
+    private final RabbitTemplate rabbitTemplate;
+    private final SoapHelper soapHelper;
 
-    @Value("${ebms.outbound.signing-key-alias:signing-key}")
-    private String defaultSigningKeyAlias;
-
-    // ── AMQP Listener ─────────────────────────────────────────────────────────
+    @Value("${ebms.outbound.max-retries:5}")
+    private int maxRetries;
 
     /**
-     * Verwerkt een uitgaand ebMS2-bericht van de outbound-queue.
-     *
-     * @param message     deserialized {@link EbmsOutboundMessage} van de backoffice
-     * @param amqpChannel RabbitMQ kanaal voor manual ack/nack
-     * @param deliveryTag AMQP delivery tag voor ack/nack
+     * Luistert naar uitgaande berichten op de RabbitMQ-queue.
+     * Implementeert handmatige acks om requeue-gedrag nauwkeurig te sturen.
      */
-    @RabbitListener(queues = RabbitMqConfig.QUEUE_OUTBOUND)
-    @Transactional
-    public void handleOutboundMessage(
-            EbmsOutboundMessage message,
-            Channel amqpChannel,
-            @Header(AmqpHeaders.DELIVERY_TAG) long deliveryTag) {
+    @RabbitListener(queues = RabbitMqConfig.QUEUE_OUTBOUND, ackMode = "MANUAL")
+    public void handleOutboundMessage(EbmsOutboundMessage outboundMsg, Channel channel,
+                                      @Header(AmqpHeaders.DELIVERY_TAG) long deliveryTag) {
+        log.info("[OUTBOUND-CONSUMER] Ontvangen bericht messageId={} op queue", outboundMsg.getMessageId());
 
-        String messageId = message.getMessageId();
-        log.info("[OUTBOUND] Verwerken: messageId={}", messageId);
-
+        EbmsMessageEntity entity = null;
         try {
-            EbxmlMessageHeader header = message.getHeader();
-            if (header == null || header.getCpaId() == null) {
-                log.error("[OUTBOUND] Ongeldig bericht: messageId={} – ontbrekende header", messageId);
-                nack(amqpChannel, deliveryTag, false); // gooi weg, niet opnieuw proberen
+            // 1. Idempotent persisteren van de uitgaande berichtstatus (voorkomt unique-constraint fouten)
+            entity = persistOutboundMessage(outboundMsg);
+
+            // 2. Berichtvalidatie (basic check ter voorkoming van poison pills)
+            if (outboundMsg.getMessageId() == null || outboundMsg.getCpaId() == null) {
+                log.error("[OUTBOUND-CONSUMER] Ongeldig AMQP bericht ontvangen (messageId of cpaId ontbreekt). Terminale fout.");
+                markAsFailedAndAck(entity, outboundMsg.getMessageId(), "INVALID_AMQP_MESSAGE", channel, deliveryTag);
                 return;
             }
 
-            String cpaId     = header.getCpaId();
-            String toPartyId = extractToPartyId(header);
-
-            // ── 1. Afleverkanaal ophalen (gecached via CpaChannelCacheService) ─
-            DeliveryChannelDto channel = cpaChannelCacheService.getChannel(cpaId, toPartyId);
-            EbxmlProfile       profile = EbxmlProfile.fromCode(channel.getDkProfile());
-            boolean            requireAck = profile.hasReliableMessaging();
-
-            // ── 2. SOAP-envelop opbouwen ──────────────────────────────────
-            SOAPMessage soapMsg    = soapHelper.buildOutboundSoap(header, requireAck);
-            String      rawSoapXml = soapHelper.soapToString(soapMsg);
-
-            // ── 3. Signing (indien vereist door profiel) ───────────────────
-            if (profile.requiresSigning()) {
-                String signingAlias = defaultSigningKeyAlias;
-                log.debug("[OUTBOUND] Signing: messageId={} alias={}", messageId, signingAlias);
-                rawSoapXml = cryptoServiceClient.sign(rawSoapXml, signingAlias, messageId);
+            // 3. CPA Lookup voor het afleverkanaal (Splitsing transient vs terminale fouten ter voorkoming van requeue loop)
+            DeliveryChannelDto deliveryChannel;
+            try {
+                deliveryChannel = cpaChannelCacheService.findDeliveryChannel(outboundMsg.getCpaId(), outboundMsg.getToPartyId());
+                if (deliveryChannel == null) {
+                    throw new EbmsException("CHANNEL_NOT_FOUND", "Geen geldig afleverkanaal gevonden voor CPA=" + outboundMsg.getCpaId());
+                }
+            } catch (EbmsException e) {
+                if ("CHANNEL_NOT_FOUND".equals(e.getErrorCode())) {
+                    // TERMINALE FOUT: CPA-Id of Party-Id is niet correct ingesteld.
+                    log.error("[OUTBOUND-CONSUMER] CPA-lookup permanent gefaald: Afleverkanaal niet geconfigureerd. MessageId={}", outboundMsg.getMessageId(), e);
+                    markAsFailedAndAck(entity, outboundMsg.getMessageId(), "CHANNEL_NOT_FOUND", channel, deliveryTag);
+                    return;
+                }
+                // TRANSIËNTE FOUT (bijv. CPA_SERVICE_UNAVAILABLE): Laat deze doorstromen naar de outer catch voor retry/requeue!
+                throw e;
+            } catch (Exception e) {
+                log.error("[OUTBOUND-CONSUMER] Onverwachte fout bij CPA-lookup voor messageId={}", outboundMsg.getMessageId(), e);
+                throw e;
             }
 
-            // ── 4. Encryptie (indien vereist door profiel) ─────────────────
-            if (profile.requiresEncryption()) {
-                String recipientAlias = toPartyId; // alias = OIN/partyId van ontvanger
-                log.debug("[OUTBOUND] Versleutelen: messageId={} recipient={}", messageId, recipientAlias);
-                rawSoapXml = cryptoServiceClient.encrypt(rawSoapXml, recipientAlias, messageId);
+            // 4. Crypto Pipeline (Signeren & Encryptie conform het ingestelde Digikoppeling profiel)
+            EbxmlProfile profile = outboundMsg.getProfile();
+            boolean requiresSigning = (profile == EbxmlProfile.OSB_BE_S || profile == EbxmlProfile.OSB_RM_S ||
+                                       profile == EbxmlProfile.OSB_RM_E || profile == EbxmlProfile.OSB_BE_E);
+            boolean requiresEncryption = (profile == EbxmlProfile.OSB_RM_E || profile == EbxmlProfile.OSB_BE_E);
+
+            String processedSoapXml = entity.getRawSoapXml();
+            try {
+                if (requiresSigning) {
+                    log.debug("[OUTBOUND-CONSUMER] Signeren van bericht messageId={}", outboundMsg.getMessageId());
+                    processedSoapXml = cryptoServiceClient.sign(processedSoapXml, "orchestrator-key", outboundMsg.getMessageId());
+                }
+                if (requiresEncryption) {
+                    log.debug("[OUTBOUND-CONSUMER] Encrypten van bericht messageId={}", outboundMsg.getMessageId());
+                    processedSoapXml = cryptoServiceClient.encrypt(processedSoapXml, "orchestrator-key", outboundMsg.getMessageId());
+                }
+            } catch (Exception e) {
+                log.error("[OUTBOUND-CONSUMER] Cryptografische verwerking mislukt voor messageId={}. Terminale fout.", outboundMsg.getMessageId(), e);
+                markAsFailedAndAck(entity, outboundMsg.getMessageId(), "CRYPTO_PROCESSING_FAILED", channel, deliveryTag);
+                return;
             }
 
-            // ── 5. Persisteer bericht in database (status=PROCESSING) ──────
-            EbmsMessageEntity entity = persistOutboundMessage(message, header, rawSoapXml, channel);
+            // 5. Verzenden van het bewerkte SOAP-bericht via CXF
+            try {
+                log.info("[OUTBOUND-CONSUMER] Versturen SOAP messageId={} naar endpoint={}", outboundMsg.getMessageId(), deliveryChannel.getEndpoint());
+                
+                // Converteer String XML terug naar SOAPMessage en verstuur
+                SOAPMessage soapMessage = soapHelper.stringToSoap(processedSoapXml);
+                outboundSoapClient.send(soapMessage, deliveryChannel.getEndpoint());
 
-            // ── 6. Versturen via CXF SOAP-client ──────────────────────────
-            outboundSoapClient.send(channel.getEndpointUrl(), rawSoapXml, cpaId, toPartyId);
+                // 6. Statusovergang bij succesvolle verzending
+                boolean isReliable = (profile == EbxmlProfile.OSB_RM || profile == EbxmlProfile.OSB_RM_S || profile == EbxmlProfile.OSB_RM_E);
+                if (isReliable) {
+                    entity.setStatus(MessageStatus.SENT); // Wachten op asynchrone ACK
+                } else {
+                    entity.setStatus(MessageStatus.DELIVERED); // Best effort, direct gereed
+                }
+                entity.setUpdatedAt(Instant.now());
+                ebmsMessageRepository.save(entity);
 
-            // ── 7. Status-machine bijwerken ────────────────────────────────
-            if (requireAck) {
-                // Reliable Messaging: SENT – wacht op ebMS2 Acknowledgment
-                entity.setStatus(MessageStatus.SENT);
-                entity.setAckRequested(true);
-                log.info("[OUTBOUND] Verzonden (RM) – wacht op ACK: messageId={}", messageId);
-            } else {
-                // Best Effort: direct DELIVERED
-                entity.setStatus(MessageStatus.DELIVERED);
-                log.info("[OUTBOUND] Verzonden (BE) – DELIVERED: messageId={}", messageId);
+                // Publiceer succes audit-event
+                publishAuditEvent(entity, "MESSAGE_SENT");
+
+                // Bevestig berichtontvangst bij RabbitMQ (ack)
+                channel.basicAck(deliveryTag, false);
+                log.info("[OUTBOUND-CONSUMER] Outbound pipeline succesvol afgerond voor messageId={}, status={}", outboundMsg.getMessageId(), entity.getStatus());
+
+            } catch (Exception e) {
+                // 7. Netwerk/Verzendfout afhandeling met retry-scheduler integratie
+                log.warn("[OUTBOUND-CONSUMER] Netwerkfout bij verzenden messageId={}, start retry-afhandeling", outboundMsg.getMessageId(), e);
+                handleOutboundFailure(entity, outboundMsg.getMessageId(), channel, deliveryTag);
             }
-            messageRepository.save(entity);
-
-            // ── 8. Audit-event publiceren ──────────────────────────────────
-            publishAudit(AuditEvent.builder()
-                .eventType("MESSAGE_SENT")
-                .messageId(messageId)
-                .conversationId(header.getConversationId())
-                .cpaId(cpaId)
-                .action(header.getAction())
-                .result("SUCCESS")
-                .build());
-
-            // ── 9. AMQP ACK ───────────────────────────────────────────────
-            ack(amqpChannel, deliveryTag);
-
-        } catch (EbmsException e) {
-            log.error("[OUTBOUND] EbmsException: messageId={} code={} msg={}",
-                messageId, e.getErrorCode(), e.getMessage());
-            // Rollback: zonder dit commit @Transactional de transactie alsnog (de exception wordt
-            // hier afgevangen, dus Spring ziet geen fout) en blijft de entity stilletjes op
-            // PROCESSING staan, ook al is de daadwerkelijke verzending nooit gelukt.
-            TransactionAspectSupport.currentTransactionStatus().setRollbackOnly();
-            nack(amqpChannel, deliveryTag, true); // requeue voor retry
 
         } catch (Exception e) {
-            log.error("[OUTBOUND] Onverwachte fout: messageId={}", messageId, e);
-            TransactionAspectSupport.currentTransactionStatus().setRollbackOnly();
-            nack(amqpChannel, deliveryTag, true); // requeue voor retry
+            log.error("[OUTBOUND-CONSUMER] Onverwachte fout in outbound consumer voor messageId={}", outboundMsg.getMessageId(), e);
+            if (entity != null) {
+                handleOutboundFailure(entity, outboundMsg.getMessageId(), channel, deliveryTag);
+            } else {
+                // Als persisteren zelf faalt, nack met requeue=false om deadlock te vermijden
+                try {
+                    channel.basicNack(deliveryTag, false, false);
+                } catch (IOException ioe) {
+                    log.error("Failed to nack message", ioe);
+                }
+            }
         }
     }
 
-    // ── Interne helpers ───────────────────────────────────────────────────────
-
-    private EbmsMessageEntity persistOutboundMessage(
-            EbmsOutboundMessage message,
-            EbxmlMessageHeader  header,
-            String              rawSoapXml,
-            DeliveryChannelDto  channel) {
-
-        String fromPartyId = header.getFrom() != null && !header.getFrom().isEmpty()
-            ? header.getFrom().get(0).getValue() : "UNKNOWN";
-        String toPartyId   = header.getTo() != null && !header.getTo().isEmpty()
-            ? header.getTo().get(0).getValue() : "UNKNOWN";
-        String messageId   = message.getMessageId();
-
-        // ── Idempotente upsert: bij retry hetzelfde bericht bijwerken ──────────
-        // Zonder dit levert een requeue-cyclus een unique-constraint fout op
-        // (messageId-kolom is unique=true in EbmsMessageEntity).
-        return messageRepository.findByMessageId(messageId)
+    /**
+     * Idempotente insert-of-update operatie om unique-constraint fouten te voorkomen.
+     */
+    @Transactional
+    public EbmsMessageEntity persistOutboundMessage(EbmsOutboundMessage outboundMsg) {
+        return ebmsMessageRepository.findByMessageId(outboundMsg.getMessageId())
             .map(existing -> {
-                // Bijwerken wat kan zijn gewijzigd (bijv. nieuw gesigneerde/versleutelde SOAP)
-                existing.setRawSoapXml(rawSoapXml);
-                existing.setPayloadRef(message.getPayloadRef());
-                existing.setPayloadContentType(message.getPayloadContentType());
-                existing.setStatus(MessageStatus.PROCESSING);
-                log.debug("[OUTBOUND] Idempotente herverwerking: messageId={}", messageId);
-                return messageRepository.save(existing);
+                log.info("[OUTBOUND] Bestaand bericht messageId={} gevonden in DB, status wordt bijgewerkt", outboundMsg.getMessageId());
+                existing.setUpdatedAt(Instant.now());
+                return ebmsMessageRepository.save(existing);
             })
             .orElseGet(() -> {
-                // TTL berekenen uit CPA persistDuration (in seconden)
-                Instant ttl = channel.getPersistDuration() != null
-                    ? Instant.now().plusSeconds(channel.getPersistDuration()) : null;
-
-                EbmsMessageEntity entity = EbmsMessageEntity.builder()
-                    .messageId(messageId)
-                    .conversationId(header.getConversationId())
-                    .cpaId(header.getCpaId())
-                    .fromPartyId(fromPartyId)
-                    .toPartyId(toPartyId)
-                    .fromRole(header.getFromRole())
-                    .toRole(header.getToRole())
-                    .service(header.getService() != null ? header.getService().getValue() : "UNKNOWN")
-                    .serviceType(header.getService() != null ? header.getService().getType() : null)
-                    .action(header.getAction())
-                    .direction(MessageDirection.OUTBOUND)
-                    .status(MessageStatus.PROCESSING)
-                    .timestamp(Instant.now())
-                    .timeToLive(ttl)
-                    .payloadRef(message.getPayloadRef())
-                    .payloadContentType(message.getPayloadContentType())
-                    .rawSoapXml(rawSoapXml)
-                    .build();
-
-                return messageRepository.save(entity);
+                log.info("[OUTBOUND] Nieuwe database record aanmaken voor messageId={}", outboundMsg.getMessageId());
+                EbmsMessageEntity entity = new EbmsMessageEntity();
+                entity.setMessageId(outboundMsg.getMessageId());
+                entity.setConversationId(outboundMsg.getConversationId());
+                entity.setCpaId(outboundMsg.getCpaId());
+                entity.setService(outboundMsg.getService());
+                entity.setServiceType(outboundMsg.getServiceType());
+                entity.setAction(outboundMsg.getAction());
+                entity.setFromPartyId(outboundMsg.getFromPartyId());
+                entity.setFromPartyType(outboundMsg.getFromPartyType());
+                entity.setFromRole(outboundMsg.getFromRole());
+                entity.setToPartyId(outboundMsg.getToPartyId());
+                entity.setToPartyType(outboundMsg.getToPartyType());
+                entity.setToRole(outboundMsg.getToRole());
+                entity.setTimestamp(outboundMsg.getTimestamp());
+                entity.setTimeToLive(outboundMsg.getTimeToLive());
+                entity.setRawSoapXml(outboundMsg.getRawSoapXml());
+                entity.setDirection(MessageDirection.OUTBOUND);
+                entity.setStatus(MessageStatus.PROCESSING);
+                entity.setRetryCount(0);
+                entity.setAckRequested(outboundMsg.isAckRequested());
+                entity.setDuplicateElimination(outboundMsg.isDuplicateElimination());
+                entity.setPayloadRef(outboundMsg.getPayloadRef());
+                entity.setPayloadContentType(outboundMsg.getPayloadContentType());
+                entity.setCreatedAt(Instant.now());
+                entity.setUpdatedAt(Instant.now());
+                return ebmsMessageRepository.save(entity);
             });
     }
 
-    private String extractToPartyId(EbxmlMessageHeader header) {
-        if (header.getTo() != null && !header.getTo().isEmpty()) {
-            return header.getTo().get(0).getValue();
+    /**
+     * Handelt netwerk-/transiënte fouten af. Verhoogt de retry-count en requeued indien mogelijk.
+     */
+    private void handleOutboundFailure(EbmsMessageEntity entity, String messageId, Channel channel, long deliveryTag) {
+        try {
+            int currentRetry = entity.getRetryCount() != null ? entity.getRetryCount() : 0;
+            if (currentRetry >= maxRetries) {
+                log.error("[OUTBOUND] Maximaal aantal retries ({}) bereikt voor messageId={}. Status wordt FAILED.", maxRetries, messageId);
+                entity.setStatus(MessageStatus.FAILED);
+                entity.setUpdatedAt(Instant.now());
+                ebmsMessageRepository.save(entity);
+                publishAuditEvent(entity, "MESSAGE_FAILED_MAX_RETRIES");
+                channel.basicAck(deliveryTag, false); // Definitief verwijderen uit queue
+            } else {
+                entity.setRetryCount(currentRetry + 1);
+                entity.setLastRetryAt(Instant.now());
+                entity.setUpdatedAt(Instant.now());
+                ebmsMessageRepository.save(entity);
+
+                // Requeue het bericht op de queue voor een volgende poging
+                channel.basicNack(deliveryTag, false, true);
+                log.info("[OUTBOUND] Bericht requeued voor retry (poging {}/{})", currentRetry + 1, maxRetries);
+            }
+        } catch (Exception ex) {
+            log.error("Fout tijdens foutverwerking voor messageId={}", messageId, ex);
         }
-        throw new EbmsException("INVALID_HEADER", "To-partij ontbreekt in ebXML MessageHeader");
     }
 
-    private void publishAudit(AuditEvent event) {
-        try {
-            rabbitTemplate.convertAndSend(
-                RabbitMqConfig.EXCHANGE_EBMS,
-                RabbitMqConfig.ROUTING_AUDIT,
-                event);
-        } catch (Exception e) {
-            log.warn("[OUTBOUND] Audit-event kon niet gepubliceerd worden: {}", e.getMessage());
+    /**
+     * Markeert het bericht als terminal FAILED, publiceert een audit event en bevestigt ontvangst om requeuing te stoppen.
+     */
+    private void markAsFailedAndAck(EbmsMessageEntity entity, String messageId, String errorReason, Channel channel, long deliveryTag) throws IOException {
+        if (entity != null) {
+            entity.setStatus(MessageStatus.FAILED);
+            entity.setUpdatedAt(Instant.now());
+            ebmsMessageRepository.save(entity);
+            publishAuditEvent(entity, errorReason);
         }
+        channel.basicAck(deliveryTag, false);
+        log.warn("[OUTBOUND] Bericht messageId={} definitief afgekeurd (fout: {}), ack verstuurd om requeue te voorkomen.", messageId, errorReason);
     }
 
-    private void ack(Channel channel, long deliveryTag) {
+    /**
+     * Hulpmethode om append-only audit events te publiceren op de AMQP exchange.\n     */
+    private void publishAuditEvent(EbmsMessageEntity entity, String eventType) {
         try {
-            channel.basicAck(deliveryTag, false);
+            AuditEvent event = new AuditEvent();
+            event.setMessageId(entity.getMessageId());
+            event.setCpaId(entity.getCpaId());
+            event.setDirection(entity.getDirection().name());
+            event.setStatus(entity.getStatus().name());
+            event.setTimestamp(Instant.now());
+            event.setEventType(eventType);
+            rabbitTemplate.convertAndSend("ebms.audit.events", "", event);
+            log.debug("[AUDIT-LOG] Event '{}' gepubliceerd voor messageId={}", eventType, entity.getMessageId());
         } catch (Exception e) {
-            log.warn("[OUTBOUND] AMQP ACK mislukt: {}", e.getMessage());
-        }
-    }
-
-    private void nack(Channel channel, long deliveryTag, boolean requeue) {
-        try {
-            channel.basicNack(deliveryTag, false, requeue);
-        } catch (Exception e) {
-            log.warn("[OUTBOUND] AMQP NACK mislukt: {}", e.getMessage());
+            log.error("Fout bij publiceren van audit-event '{}' voor messageId={}", eventType, entity.getMessageId(), e);
         }
     }
 }
