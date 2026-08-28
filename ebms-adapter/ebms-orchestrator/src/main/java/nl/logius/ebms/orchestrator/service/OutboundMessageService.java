@@ -17,7 +17,7 @@ import nl.logius.ebms.orchestrator.entity.MessageStatus;
 import nl.logius.ebms.orchestrator.repository.EbmsMessageRepository;
 import nl.logius.ebms.orchestrator.soap.OutboundSoapClient;
 import nl.logius.ebms.orchestrator.soap.SoapHelper;
-import nl.logius.ebms.orchestrator.client.CryptoServiceClient;
+
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.amqp.support.AmqpHeaders;
 import org.springframework.beans.factory.annotation.Value;
