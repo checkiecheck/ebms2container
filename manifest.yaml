@@ -1,0 +1,749 @@
+apiVersion: v1
+automountServiceAccountToken: false
+kind: ServiceAccount
+metadata:
+  labels:
+    app.kubernetes.io/component: cpa-service
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: cpa-service
+    app.kubernetes.io/part-of: ebms-adapter
+    app.kubernetes.io/version: 1.0.0
+    helm.sh/chart: cpa-service-1.0.0
+  name: ebms-cpa-service
+  namespace: default
+---
+apiVersion: v1
+automountServiceAccountToken: false
+kind: ServiceAccount
+metadata:
+  labels:
+    app.kubernetes.io/component: crypto-service
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: crypto-service
+    app.kubernetes.io/part-of: ebms-adapter
+    app.kubernetes.io/version: 1.0.0
+    helm.sh/chart: crypto-service-1.0.0
+  name: ebms-crypto-service
+  namespace: default
+---
+apiVersion: v1
+automountServiceAccountToken: false
+kind: ServiceAccount
+metadata:
+  labels:
+    app.kubernetes.io/component: orchestrator
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: ebms-orchestrator
+    app.kubernetes.io/part-of: ebms-adapter
+    app.kubernetes.io/version: 1.0.0
+    helm.sh/chart: ebms-orchestrator-1.0.0
+  name: ebms-ebms-orchestrator
+  namespace: default
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  annotations:
+    helm.sh/resource-policy: keep
+  labels:
+    app.kubernetes.io/component: cpa-service
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: cpa-service
+    app.kubernetes.io/part-of: ebms-adapter
+    app.kubernetes.io/version: 1.0.0
+    helm.sh/chart: cpa-service-1.0.0
+  name: ebms-cpa-service-secret
+  namespace: default
+stringData:
+  SPRING_DATASOURCE_PASSWORD: change-me-cpa
+type: Opaque
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  annotations:
+    helm.sh/resource-policy: keep
+  labels:
+    app.kubernetes.io/component: crypto-service
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: crypto-service
+    app.kubernetes.io/part-of: ebms-adapter
+    app.kubernetes.io/version: 1.0.0
+    helm.sh/chart: crypto-service-1.0.0
+  name: ebms-crypto-service-secret
+  namespace: default
+stringData:
+  KEYSTORE_PASSWORD: change-me-keystore
+  SPRING_DATASOURCE_PASSWORD: change-me-crypto
+type: Opaque
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  annotations:
+    helm.sh/resource-policy: keep
+  labels:
+    app.kubernetes.io/component: orchestrator
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: ebms-orchestrator
+    app.kubernetes.io/part-of: ebms-adapter
+    app.kubernetes.io/version: 1.0.0
+    helm.sh/chart: ebms-orchestrator-1.0.0
+  name: ebms-ebms-orchestrator-secret
+  namespace: default
+stringData:
+  SPRING_DATASOURCE_PASSWORD: change-me-orchestrator
+  SPRING_RABBITMQ_PASSWORD: change-me-amqp
+type: Opaque
+---
+apiVersion: v1
+data:
+  SPRING_DATASOURCE_URL: jdbc:postgresql://ebms-postgresql:5432/ebms_cpa
+  SPRING_DATASOURCE_USERNAME: ebms
+kind: ConfigMap
+metadata:
+  labels:
+    app.kubernetes.io/component: cpa-service
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: cpa-service
+    app.kubernetes.io/part-of: ebms-adapter
+    app.kubernetes.io/version: 1.0.0
+    helm.sh/chart: cpa-service-1.0.0
+  name: ebms-cpa-service-config
+  namespace: default
+---
+apiVersion: v1
+data:
+  KEYSTORE_PATH: /app/keystores/keystore.p12
+  SPRING_DATASOURCE_URL: jdbc:postgresql://ebms-postgresql:5432/ebms_crypto
+  SPRING_DATASOURCE_USERNAME: ebms
+kind: ConfigMap
+metadata:
+  labels:
+    app.kubernetes.io/component: crypto-service
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: crypto-service
+    app.kubernetes.io/part-of: ebms-adapter
+    app.kubernetes.io/version: 1.0.0
+    helm.sh/chart: crypto-service-1.0.0
+  name: ebms-crypto-service-config
+  namespace: default
+---
+apiVersion: v1
+data:
+  CPA_SERVICE_URL: http://cpa-service:8081
+  CRYPTO_SERVICE_URL: http://crypto-service:8082
+  EBMS_CONNECT_TIMEOUT_MS: '10000'
+  EBMS_DECRYPTION_KEY_ALIAS: encryption-key
+  EBMS_READ_TIMEOUT_MS: '30000'
+  EBMS_SIGNING_KEY_ALIAS: signing-key
+  SPRING_DATASOURCE_URL: jdbc:postgresql://ebms-postgresql:5432/ebms_orchestrator
+  SPRING_DATASOURCE_USERNAME: ebms
+  SPRING_RABBITMQ_HOST: ebms-rabbitmq
+  SPRING_RABBITMQ_PORT: '5672'
+  SPRING_RABBITMQ_USERNAME: ebms_amqp
+  SPRING_RABBITMQ_VIRTUAL_HOST: ebms
+kind: ConfigMap
+metadata:
+  labels:
+    app.kubernetes.io/component: orchestrator
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: ebms-orchestrator
+    app.kubernetes.io/part-of: ebms-adapter
+    app.kubernetes.io/version: 1.0.0
+    helm.sh/chart: ebms-orchestrator-1.0.0
+  name: ebms-ebms-orchestrator-config
+  namespace: default
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app.kubernetes.io/component: cpa-service
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: cpa-service
+    app.kubernetes.io/part-of: ebms-adapter
+    app.kubernetes.io/version: 1.0.0
+    helm.sh/chart: cpa-service-1.0.0
+  name: ebms-cpa-service
+  namespace: default
+spec:
+  ports:
+  - name: http
+    port: 8081
+    protocol: TCP
+    targetPort: http
+  selector:
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/name: cpa-service
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    konghq.com/override: internal-only
+  labels:
+    app.kubernetes.io/component: crypto-service
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: crypto-service
+    app.kubernetes.io/part-of: ebms-adapter
+    app.kubernetes.io/version: 1.0.0
+    helm.sh/chart: crypto-service-1.0.0
+  name: ebms-crypto-service
+  namespace: default
+spec:
+  ports:
+  - name: http
+    port: 8082
+    protocol: TCP
+    targetPort: http
+  selector:
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/name: crypto-service
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app.kubernetes.io/component: orchestrator
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: ebms-orchestrator
+    app.kubernetes.io/part-of: ebms-adapter
+    app.kubernetes.io/version: 1.0.0
+    helm.sh/chart: ebms-orchestrator-1.0.0
+  name: ebms-ebms-orchestrator
+  namespace: default
+spec:
+  ports:
+  - name: http
+    port: 8080
+    protocol: TCP
+    targetPort: http
+  selector:
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/name: ebms-orchestrator
+  type: ClusterIP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/component: cpa-service
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: cpa-service
+    app.kubernetes.io/part-of: ebms-adapter
+    app.kubernetes.io/version: 1.0.0
+    helm.sh/chart: cpa-service-1.0.0
+  name: ebms-cpa-service
+  namespace: default
+spec:
+  progressDeadlineSeconds: 1200
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: ebms
+      app.kubernetes.io/name: cpa-service
+  template:
+    metadata:
+      annotations:
+        checksum/config: d20dd2cba654b58c3007bda39842fbc60747055a0894a31259fa01ecd4da749c
+        checksum/secret: 9e10c6c3c2334abe891ee74eafec1efe335f6c35894be5e7bd66ccfeb7accb4e
+      labels:
+        app.kubernetes.io/instance: ebms
+        app.kubernetes.io/name: cpa-service
+    spec:
+      containers:
+      - env:
+        - name: CPA_SERVICE_URL
+          value: http://ebms-cpa-service:8081
+        - name: CRYPTO_SERVICE_URL
+          value: http://ebms-crypto-service:8082
+        - name: KEYSTORE_PATH
+          value: /app/keystores/keystore.p12
+        - name: KEYSTORE_PASSWORD
+          value: change-me-keystore
+        - name: TRUSTSTORE_PATH
+          value: /app/keystores/truststore.p12
+        - name: TRUSTSTORE_PASSWORD
+          value: change-me-truststore
+        - name: SPRING_DATASOURCE_USERNAME
+          value: karavan
+        - name: SPRING_DATASOURCE_PASSWORD
+          value: karavan
+        - name: SPRING_FLYWAY_USER
+          value: karavan
+        - name: SPRING_FLYWAY_PASSWORD
+          value: karavan
+        - name: SPRING_FLYWAY_BASELINE_ON_MIGRATE
+          value: 'true'
+        - name: SPRING_FLYWAY_VALIDATE_ON_MIGRATE
+          value: 'false'
+        - name: SPRING_FLYWAY_REPAIR_ON_MIGRATE
+          value: 'true'
+        - name: SPRING_JPA_HIBERNATE_DDL_AUTO
+          value: none
+        - name: SPRING_RABBITMQ_HOST
+          value: 192.168.56.10
+        - name: SPRING_RABBITMQ_PORT
+          value: '5672'
+        - name: SPRING_RABBITMQ_USERNAME
+          value: karavan
+        - name: SPRING_RABBITMQ_PASSWORD
+          value: karavan
+        - name: SPRING_RABBITMQ_USER
+          value: karavan
+        - name: SPRING_RABBITMQ_PASS
+          value: karavan
+        - name: SPRING_RABBITMQ_VIRTUAL_HOST
+          value: ebms
+        - name: SPRING_RABBITMQ_VIRTUALHOST
+          value: ebms
+        - name: SPRING_DATASOURCE_URL
+          value: jdbc:postgresql://192.168.56.10:5432/karavan?currentSchema=cpa&stringtype=unspecified
+        envFrom:
+        - configMapRef:
+            name: ebms-cpa-service-config
+        - secretRef:
+            name: ebms-cpa-service-secret
+        image: 192.168.56.10:5555/municipal/ebms-cpa:latest
+        imagePullPolicy: Always
+        livenessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /actuator/health/liveness
+            port: http
+          initialDelaySeconds: 180
+          periodSeconds: 15
+        name: cpa-service
+        ports:
+        - containerPort: 8081
+          name: http
+          protocol: TCP
+        readinessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /actuator/health/readiness
+            port: http
+          initialDelaySeconds: 180
+          periodSeconds: 10
+        resources:
+          limits:
+            cpu: 500m
+            memory: 512Mi
+          requests:
+            cpu: 125m
+            memory: 256Mi
+      securityContext:
+        fsGroup: 1000
+        runAsNonRoot: true
+        runAsUser: 1000
+      serviceAccountName: ebms-cpa-service
+      topologySpreadConstraints:
+      - labelSelector:
+          matchLabels:
+            app.kubernetes.io/instance: ebms
+            app.kubernetes.io/name: cpa-service
+        maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: DoNotSchedule
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/component: crypto-service
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: crypto-service
+    app.kubernetes.io/part-of: ebms-adapter
+    app.kubernetes.io/version: 1.0.0
+    helm.sh/chart: crypto-service-1.0.0
+  name: ebms-crypto-service
+  namespace: default
+spec:
+  progressDeadlineSeconds: 1200
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: ebms
+      app.kubernetes.io/name: crypto-service
+  template:
+    metadata:
+      annotations:
+        checksum/config: 5d5b6a793a23dab6e1ef940b1d8cbb63e8757d8a01010cf1cad8c899d3de06e2
+        checksum/secret: c1ea7a601c386f1d3692820ea7f4faec5f466828c96de4a311e6b26a69585d24
+      labels:
+        app.kubernetes.io/instance: ebms
+        app.kubernetes.io/name: crypto-service
+    spec:
+      containers:
+      - env:
+        - name: CPA_SERVICE_URL
+          value: http://ebms-cpa-service:8081
+        - name: CRYPTO_SERVICE_URL
+          value: http://ebms-crypto-service:8082
+        - name: KEYSTORE_PATH
+          value: /app/keystores/keystore.p12
+        - name: KEYSTORE_PASSWORD
+          value: change-me-keystore
+        - name: TRUSTSTORE_PATH
+          value: /app/keystores/truststore.p12
+        - name: TRUSTSTORE_PASSWORD
+          value: change-me-truststore
+        - name: SPRING_DATASOURCE_USERNAME
+          value: karavan
+        - name: SPRING_DATASOURCE_PASSWORD
+          value: karavan
+        - name: SPRING_FLYWAY_USER
+          value: karavan
+        - name: SPRING_FLYWAY_PASSWORD
+          value: karavan
+        - name: SPRING_FLYWAY_BASELINE_ON_MIGRATE
+          value: 'true'
+        - name: SPRING_FLYWAY_VALIDATE_ON_MIGRATE
+          value: 'false'
+        - name: SPRING_FLYWAY_REPAIR_ON_MIGRATE
+          value: 'true'
+        - name: SPRING_JPA_HIBERNATE_DDL_AUTO
+          value: none
+        - name: SPRING_RABBITMQ_HOST
+          value: 192.168.56.10
+        - name: SPRING_RABBITMQ_PORT
+          value: '5672'
+        - name: SPRING_RABBITMQ_USERNAME
+          value: karavan
+        - name: SPRING_RABBITMQ_PASSWORD
+          value: karavan
+        - name: SPRING_RABBITMQ_USER
+          value: karavan
+        - name: SPRING_RABBITMQ_PASS
+          value: karavan
+        - name: SPRING_RABBITMQ_VIRTUAL_HOST
+          value: ebms
+        - name: SPRING_RABBITMQ_VIRTUALHOST
+          value: ebms
+        - name: SPRING_DATASOURCE_URL
+          value: jdbc:postgresql://192.168.56.10:5432/karavan?currentSchema=crypto&stringtype=unspecified
+        envFrom:
+        - configMapRef:
+            name: ebms-crypto-service-config
+        - secretRef:
+            name: ebms-crypto-service-secret
+        image: 192.168.56.10:5555/municipal/ebms-crypto:latest
+        imagePullPolicy: Always
+        livenessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /actuator/health/liveness
+            port: http
+          initialDelaySeconds: 180
+          periodSeconds: 15
+        name: crypto-service
+        ports:
+        - containerPort: 8082
+          name: http
+          protocol: TCP
+        readinessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /actuator/health/readiness
+            port: http
+          initialDelaySeconds: 180
+          periodSeconds: 10
+        resources:
+          limits:
+            cpu: 1000m
+            memory: 1Gi
+          requests:
+            cpu: 250m
+            memory: 512Mi
+        volumeMounts:
+        - mountPath: /app/keystores
+          name: keystore-volume
+          readOnly: false
+      securityContext:
+        fsGroup: 1000
+        runAsNonRoot: true
+        runAsUser: 1000
+      serviceAccountName: ebms-crypto-service
+      topologySpreadConstraints:
+      - labelSelector:
+          matchLabels:
+            app.kubernetes.io/instance: ebms
+            app.kubernetes.io/name: crypto-service
+        maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: DoNotSchedule
+      volumes:
+      - name: keystore-volume
+        secret:
+          secretName: crypto-keystore-secret
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/component: orchestrator
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: ebms-orchestrator
+    app.kubernetes.io/part-of: ebms-adapter
+    app.kubernetes.io/version: 1.0.0
+    helm.sh/chart: ebms-orchestrator-1.0.0
+  name: ebms-ebms-orchestrator
+  namespace: default
+spec:
+  progressDeadlineSeconds: 1200
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: ebms
+      app.kubernetes.io/name: ebms-orchestrator
+  template:
+    metadata:
+      annotations:
+        checksum/config: 556617fdd5f1cd6ede7b9d586e577962f2b14e19eb74d458d49f85df604ca8da
+        checksum/secret: b04b58fd9a93833c9d83f1523aacea8ebd2fff5e62cbe3a37926396242464576
+      labels:
+        app.kubernetes.io/instance: ebms
+        app.kubernetes.io/name: ebms-orchestrator
+    spec:
+      containers:
+      - env:
+        - name: CPA_SERVICE_URL
+          value: http://ebms-cpa-service:8081
+        - name: CRYPTO_SERVICE_URL
+          value: http://ebms-crypto-service:8082
+        - name: KEYSTORE_PATH
+          value: /app/keystores/keystore.p12
+        - name: KEYSTORE_PASSWORD
+          value: change-me-keystore
+        - name: TRUSTSTORE_PATH
+          value: /app/keystores/truststore.p12
+        - name: TRUSTSTORE_PASSWORD
+          value: change-me-truststore
+        - name: SPRING_DATASOURCE_USERNAME
+          value: karavan
+        - name: SPRING_DATASOURCE_PASSWORD
+          value: karavan
+        - name: SPRING_FLYWAY_USER
+          value: karavan
+        - name: SPRING_FLYWAY_PASSWORD
+          value: karavan
+        - name: SPRING_FLYWAY_BASELINE_ON_MIGRATE
+          value: 'true'
+        - name: SPRING_FLYWAY_VALIDATE_ON_MIGRATE
+          value: 'false'
+        - name: SPRING_FLYWAY_REPAIR_ON_MIGRATE
+          value: 'true'
+        - name: SPRING_JPA_HIBERNATE_DDL_AUTO
+          value: none
+        - name: SPRING_RABBITMQ_HOST
+          value: 192.168.56.10
+        - name: SPRING_RABBITMQ_PORT
+          value: '5672'
+        - name: SPRING_RABBITMQ_USERNAME
+          value: karavan
+        - name: SPRING_RABBITMQ_PASSWORD
+          value: karavan
+        - name: SPRING_RABBITMQ_USER
+          value: karavan
+        - name: SPRING_RABBITMQ_PASS
+          value: karavan
+        - name: SPRING_RABBITMQ_VIRTUAL_HOST
+          value: ebms
+        - name: SPRING_RABBITMQ_VIRTUALHOST
+          value: ebms
+        - name: SPRING_DATASOURCE_URL
+          value: jdbc:postgresql://192.168.56.10:5432/karavan?currentSchema=orchestrator&stringtype=unspecified
+        envFrom:
+        - configMapRef:
+            name: ebms-ebms-orchestrator-config
+        - secretRef:
+            name: ebms-ebms-orchestrator-secret
+        image: 192.168.56.10:5555/municipal/ebms-orchestrator:latest
+        imagePullPolicy: Always
+        livenessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /actuator/health/liveness
+            port: http
+          initialDelaySeconds: 180
+          periodSeconds: 15
+        name: ebms-orchestrator
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        readinessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /actuator/health/readiness
+            port: http
+          initialDelaySeconds: 180
+          periodSeconds: 10
+        resources:
+          limits:
+            cpu: 1000m
+            memory: 1Gi
+          requests:
+            cpu: 250m
+            memory: 512Mi
+        volumeMounts:
+        - mountPath: /app/keystores
+          name: keystore-volume
+          readOnly: true
+      securityContext:
+        fsGroup: 1000
+        runAsNonRoot: true
+        runAsUser: 1000
+      serviceAccountName: ebms-ebms-orchestrator
+      topologySpreadConstraints:
+      - labelSelector:
+          matchLabels:
+            app.kubernetes.io/instance: ebms
+            app.kubernetes.io/name: ebms-orchestrator
+        maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: DoNotSchedule
+      volumes:
+      - name: keystore-volume
+        secret:
+          secretName: crypto-keystore-secret
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    konghq.com/plugins: ebms-rate-limit
+    konghq.com/preserve-host: 'true'
+    konghq.com/protocols: https
+    konghq.com/strip-path: 'false'
+  labels:
+    app.kubernetes.io/component: orchestrator
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: ebms-orchestrator
+    app.kubernetes.io/part-of: ebms-adapter
+    app.kubernetes.io/version: 1.0.0
+    helm.sh/chart: ebms-orchestrator-1.0.0
+  name: ebms-ebms-orchestrator
+  namespace: default
+spec:
+  ingressClassName: kong
+  rules:
+  - host: ebms.example.com
+    http:
+      paths:
+      - backend:
+          service:
+            name: ebms-ebms-orchestrator
+            port:
+              name: http
+        path: /soap/ebms
+        pathType: Prefix
+      - backend:
+          service:
+            name: ebms-ebms-orchestrator
+            port:
+              name: http
+        path: /admin
+        pathType: Prefix
+      - backend:
+          service:
+            name: ebms-ebms-orchestrator
+            port:
+              name: http
+        path: /api/admin
+        pathType: Prefix
+      - backend:
+          service:
+            name: ebms-cpa-service
+            port:
+              number: 8081
+        path: /api/cpa
+        pathType: Prefix
+  tls:
+  - hosts:
+    - ebms.example.com
+    secretName: ebms-tls-cert
+---
+apiVersion: configuration.konghq.com/v1
+config:
+  minute: 100
+  policy: local
+kind: KongPlugin
+metadata:
+  labels:
+    app.kubernetes.io/component: orchestrator
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: ebms-orchestrator
+    app.kubernetes.io/part-of: ebms-adapter
+    app.kubernetes.io/version: 1.0.0
+    helm.sh/chart: ebms-orchestrator-1.0.0
+  name: ebms-rate-limit
+  namespace: default
+plugin: rate-limiting
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ebms-ingress
+  annotations:
+    konghq.com/strip-path: "false"
+spec:
+  ingressClassName: kong
+  rules:
+  - http:
+      paths:
+      - path: /services/ebms
+        pathType: Prefix
+        backend:
+          service:
+            name: ebms-ebms-orchestrator
+            port:
+              number: 8080
+      - path: /admin
+        pathType: Prefix
+        backend:
+          service:
+            name: ebms-ebms-orchestrator
+            port:
+              number: 8080
+      - path: /api/admin
+        pathType: Prefix
+        backend:
+          service:
+            name: ebms-ebms-orchestrator
+            port:
+              number: 8080
+      - path: /api/cpa
+        pathType: Prefix
+        backend:
+          service:
+            name: ebms-cpa-service
+            port:
+              number: 8081
+      - path: /api/crypto
+        pathType: Prefix
+        backend:
+          service:
+            name: ebms-crypto-service
+            port:
+              number: 8082

@@ -57,6 +57,9 @@ class CpaServicePartySyncTest {
             CpaEntity e = inv.getArgument(0);
             return CpaDto.builder().cpaId(e.getCpaId()).cpaXml(e.getCpaXml()).build();
         });
+        lenient().when(partyXmlParser.parseCpaId(any())).thenReturn(CPA_ID);
+        lenient().when(partyXmlParser.parseStartDate(any())).thenReturn(null);
+        lenient().when(partyXmlParser.parseEndDate(any())).thenReturn(null);
     }
 
     private PartyInfoDto party(String partyId, String role, String service) {

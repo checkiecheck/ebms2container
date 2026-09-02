@@ -53,6 +53,10 @@ class CpaServiceUpdateTest {
     @BeforeEach
     void setUp() {
         lenient().when(partyXmlParser.parseParties(any())).thenReturn(new ArrayList<>());
+        lenient().when(partyXmlParser.parseCpaId(any())).thenReturn(CPA_ID);
+        // Default to null for dates, specific tests will override if needed
+        lenient().when(partyXmlParser.parseStartDate(any())).thenReturn(null);
+        lenient().when(partyXmlParser.parseEndDate(any())).thenReturn(null);
 
         existing = CpaEntity.builder()
                 .id(UUID.randomUUID())
@@ -81,12 +85,15 @@ class CpaServiceUpdateTest {
                     .cpaXml(e.getCpaXml()).createdAt(e.getCreatedAt()).build();
         });
 
+        when(partyXmlParser.parseStartDate(any())).thenReturn(Instant.parse("2025-06-01T00:00:00Z"));
+        when(partyXmlParser.parseEndDate(any())).thenReturn(Instant.parse("2026-06-01T00:00:00Z"));
+
         CpaDto in = CpaDto.builder()
                 .cpaId(CPA_ID)
                 .version("2.0")
                 .description("new desc")
-                .startDate(Instant.parse("2025-06-01T00:00:00Z"))
-                .endDate(Instant.parse("2026-06-01T00:00:00Z"))
+                .startDate(Instant.parse("2025-06-01T00:00:00Z")) // These are now redundant in DTO, but kept for consistency
+                .endDate(Instant.parse("2026-06-01T00:00:00Z"))   // as the service will parse from XML
                 .cpaXml("<new/>")
                 .status("SUSPENDED")
                 .build();
@@ -138,8 +145,9 @@ class CpaServiceUpdateTest {
 
     @Test
     void update_missingCpa_throwsCpaNotFoundException() {
+        when(partyXmlParser.parseCpaId(any())).thenReturn("nope"); // Mock the parser to return "nope" from XML
         when(cpaRepository.findByCpaId("nope")).thenReturn(Optional.empty());
-        assertThatThrownBy(() -> cpaService.update("nope", CpaDto.builder().cpaId("nope").build()))
+        assertThatThrownBy(() -> cpaService.update("nope", CpaDto.builder().cpaId("any").cpaXml("<xml/>").build()))
                 .isInstanceOf(CpaNotFoundException.class);
         verify(cpaRepository, never()).save(any());
     }
