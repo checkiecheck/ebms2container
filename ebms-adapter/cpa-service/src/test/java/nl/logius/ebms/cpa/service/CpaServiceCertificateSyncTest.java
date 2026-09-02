@@ -62,6 +62,9 @@ class CpaServiceCertificateSyncTest {
         });
         // parseParties is unconditionally invoked; return empty by default
         lenient().when(partyXmlParser.parseParties(any())).thenReturn(List.of());
+        lenient().when(partyXmlParser.parseCpaId(any())).thenReturn(CPA_ID);
+        lenient().when(partyXmlParser.parseStartDate(any())).thenReturn(null);
+        lenient().when(partyXmlParser.parseEndDate(any())).thenReturn(null);
     }
 
     private PartnerCertificateEntity cert(String party, String alias, String pem, String usage) {

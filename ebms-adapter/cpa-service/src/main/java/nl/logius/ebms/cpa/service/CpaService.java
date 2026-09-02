@@ -133,16 +133,40 @@ public class CpaService {
 
     @Transactional
     public CpaDto create(CpaDto dto) {
-        if (cpaRepository.existsByCpaId(dto.getCpaId())) {
-            throw new EbmsException("CPA_ALREADY_EXISTS",
-                "CPA bestaat al: " + dto.getCpaId() + ". Gebruik update (PUT) of verwijder eerst.");
+        String cpaId = partyXmlParser.parseCpaId(dto.getCpaXml());
+        if (cpaId == null || cpaId.isBlank()) {
+            throw new EbmsException("INVALID_CPA", "CPA XML bevat geen geldige cpaId.");
         }
+        if (cpaRepository.existsByCpaId(cpaId)) {
+            throw new EbmsException("CPA_ALREADY_EXISTS",
+                "CPA bestaat al: " + cpaId + ". Gebruik update (PUT) of verwijder eerst.");
+        }
+
         CpaEntity entity = cpaMapper.toEntity(dto);
+        entity.setCpaId(cpaId); // Set the parsed cpaId
+
+        // Parse and handle dates from XML
+        Instant startDate = partyXmlParser.parseStartDate(dto.getCpaXml());
+        Instant endDate = partyXmlParser.parseEndDate(dto.getCpaXml());
+
+        if (startDate != null) {
+            entity.setStartDate(startDate);
+        }
+        if (endDate != null) {
+            entity.setEndDate(endDate);
+        }
+
+        // Optional: Log warning for outdated dates
+        if (entity.getEndDate() != null && entity.getEndDate().isBefore(Instant.now())) {
+            log.warn("CPA {} heeft een einddatum in het verleden: {}. Overweeg deze te verlengen.",
+                cpaId, entity.getEndDate());
+        }
+
         List<PartyInfoDto> parsedParties = partyXmlParser.parseParties(dto.getCpaXml());
         syncParties(entity, parsedParties);
 
         CpaEntity saved = cpaRepository.save(entity);
-        syncCertificates(dto.getCpaId(), dto.getCpaXml());
+        syncCertificates(cpaId, dto.getCpaXml());
         log.info("CPA aangemaakt: {} ({} partij(en) geëxtraheerd uit XML)",
             saved.getCpaId(), parsedParties.size());
         return enrichWithDetails(cpaMapper.toDto(saved), saved);
@@ -160,18 +184,42 @@ public class CpaService {
      * {@link #addCertificate} toegevoegde certificaten die niet (meer) in de XML voorkomen
      * worden bij de volgende create/update verwijderd.
      */
-    @CacheEvict(value = "cpa-by-id", key = "#cpaId")
+    @CacheEvict(value = "cpa-by-id", key = "#cpaIdFromXml")
     @Transactional
-    public CpaDto update(String cpaId, CpaDto dto) {
-        CpaEntity entity = cpaRepository.findByCpaId(cpaId)
-            .orElseThrow(() -> new CpaNotFoundException(cpaId));
+    public CpaDto update(String cpaIdFromPath, CpaDto dto) {
+        String cpaIdFromXml = partyXmlParser.parseCpaId(dto.getCpaXml());
+        if (cpaIdFromXml == null || cpaIdFromXml.isBlank()) {
+            throw new EbmsException("INVALID_CPA", "CPA XML bevat geen geldige cpaId.");
+        }
+        if (!cpaIdFromPath.equals(cpaIdFromXml)) {
+            log.warn("CPA ID in pad ({}) komt niet overeen met CPA ID in XML ({}). Gebruik CPA ID uit XML.",
+                cpaIdFromPath, cpaIdFromXml);
+        }
+
+        CpaEntity entity = cpaRepository.findByCpaId(cpaIdFromXml)
+            .orElseThrow(() -> new CpaNotFoundException(cpaIdFromXml));
 
         if (dto.getVersion() != null) {
             entity.setVersion(dto.getVersion());
         }
         entity.setDescription(dto.getDescription());
-        entity.setStartDate(dto.getStartDate());
-        entity.setEndDate(dto.getEndDate());
+        // Parse and handle dates from XML
+        Instant startDate = partyXmlParser.parseStartDate(dto.getCpaXml());
+        Instant endDate = partyXmlParser.parseEndDate(dto.getCpaXml());
+
+        if (startDate != null) {
+            entity.setStartDate(startDate);
+        }
+        if (endDate != null) {
+            entity.setEndDate(endDate);
+        }
+
+        // Optional: Log warning for outdated dates
+        if (entity.getEndDate() != null && entity.getEndDate().isBefore(Instant.now())) {
+            log.warn("CPA {} heeft een einddatum in het verleden: {}. Overweeg deze te verlengen.",
+                cpaIdFromXml, entity.getEndDate());
+        }
+
         entity.setCpaXml(dto.getCpaXml());
         if (dto.getStatus() != null && !dto.getStatus().isBlank()) {
             entity.setStatus(dto.getStatus());
@@ -181,9 +229,9 @@ public class CpaService {
         syncParties(entity, parsedParties);
 
         CpaEntity saved = cpaRepository.save(entity);
-        syncCertificates(cpaId, dto.getCpaXml());
+        syncCertificates(cpaIdFromXml, dto.getCpaXml());
         log.info("CPA overschreven: {} ({} partij(en) gesynchroniseerd uit XML)",
-            cpaId, parsedParties.size());
+            cpaIdFromXml, parsedParties.size());
         return enrichWithDetails(cpaMapper.toDto(saved), saved);
     }
 

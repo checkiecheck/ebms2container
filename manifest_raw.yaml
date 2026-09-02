@@ -1,0 +1,1509 @@
+---
+# Source: ebms-adapter/charts/postgresql/templates/primary/networkpolicy.yaml
+kind: NetworkPolicy
+apiVersion: networking.k8s.io/v1
+metadata:
+  name: ebms-postgresql
+  namespace: "default"
+  labels:
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: postgresql
+    app.kubernetes.io/version: 17.6.0
+    helm.sh/chart: postgresql-16.7.27
+    app.kubernetes.io/component: primary
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: ebms
+      app.kubernetes.io/name: postgresql
+      app.kubernetes.io/component: primary
+  policyTypes:
+    - Ingress
+    - Egress
+  egress:
+    - {}
+  ingress:
+    - ports:
+        - port: 5432
+---
+# Source: ebms-adapter/charts/rabbitmq/templates/networkpolicy.yaml
+kind: NetworkPolicy
+apiVersion: networking.k8s.io/v1
+metadata:
+  name: ebms-rabbitmq
+  namespace: "default"
+  labels:
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: rabbitmq
+    app.kubernetes.io/version: 3.13.7
+    helm.sh/chart: rabbitmq-14.7.0
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: ebms
+      app.kubernetes.io/name: rabbitmq
+  policyTypes:
+    - Ingress
+    - Egress
+  egress:
+    - {}
+  ingress:
+    # Allow inbound connections to RabbitMQ
+    - ports:
+        - port: 4369
+        - port: 5672
+        - port: 5671
+        - port: 25672
+        - port: 15672
+---
+# Source: ebms-adapter/charts/postgresql/templates/primary/pdb.yaml
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: ebms-postgresql
+  namespace: "default"
+  labels:
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: postgresql
+    app.kubernetes.io/version: 17.6.0
+    helm.sh/chart: postgresql-16.7.27
+    app.kubernetes.io/component: primary
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: ebms
+      app.kubernetes.io/name: postgresql
+      app.kubernetes.io/component: primary
+---
+# Source: ebms-adapter/charts/rabbitmq/templates/pdb.yaml
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: ebms-rabbitmq
+  namespace: "default"
+  labels:
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: rabbitmq
+    app.kubernetes.io/version: 3.13.7
+    helm.sh/chart: rabbitmq-14.7.0
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: ebms
+      app.kubernetes.io/name: rabbitmq
+---
+# Source: ebms-adapter/charts/cpa-service/templates/serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ebms-cpa-service
+  namespace: default
+  labels:
+    helm.sh/chart: cpa-service-1.0.0
+    app.kubernetes.io/name: cpa-service
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: cpa-service
+    app.kubernetes.io/part-of: ebms-adapter
+automountServiceAccountToken: false
+---
+# Source: ebms-adapter/charts/crypto-service/templates/serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ebms-crypto-service
+  namespace: default
+  labels:
+    helm.sh/chart: crypto-service-1.0.0
+    app.kubernetes.io/name: crypto-service
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: crypto-service
+    app.kubernetes.io/part-of: ebms-adapter
+automountServiceAccountToken: false
+---
+# Source: ebms-adapter/charts/ebms-orchestrator/templates/serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ebms-ebms-orchestrator
+  namespace: default
+  labels:
+    helm.sh/chart: ebms-orchestrator-1.0.0
+    app.kubernetes.io/name: ebms-orchestrator
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: orchestrator
+    app.kubernetes.io/part-of: ebms-adapter
+automountServiceAccountToken: false
+---
+# Source: ebms-adapter/charts/postgresql/templates/serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ebms-postgresql
+  namespace: "default"
+  labels:
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: postgresql
+    app.kubernetes.io/version: 17.6.0
+    helm.sh/chart: postgresql-16.7.27
+automountServiceAccountToken: false
+---
+# Source: ebms-adapter/charts/rabbitmq/templates/serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ebms-rabbitmq
+  namespace: "default"
+  labels:
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: rabbitmq
+    app.kubernetes.io/version: 3.13.7
+    helm.sh/chart: rabbitmq-14.7.0
+automountServiceAccountToken: false
+secrets:
+  - name: ebms-rabbitmq
+---
+# Source: ebms-adapter/charts/cpa-service/templates/secret.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ebms-cpa-service-secret
+  namespace: default
+  labels:
+    helm.sh/chart: cpa-service-1.0.0
+    app.kubernetes.io/name: cpa-service
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: cpa-service
+    app.kubernetes.io/part-of: ebms-adapter
+  annotations:
+    helm.sh/resource-policy: keep
+type: Opaque
+stringData:
+  SPRING_DATASOURCE_PASSWORD: "change-me-cpa"
+---
+# Source: ebms-adapter/charts/crypto-service/templates/secret.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ebms-crypto-service-secret
+  namespace: default
+  labels:
+    helm.sh/chart: crypto-service-1.0.0
+    app.kubernetes.io/name: crypto-service
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: crypto-service
+    app.kubernetes.io/part-of: ebms-adapter
+  annotations:
+    # KRITIEK: In productie gebruik HSM of external-secrets voor keystore credentials
+    helm.sh/resource-policy: keep
+type: Opaque
+stringData:
+  SPRING_DATASOURCE_PASSWORD: "change-me-crypto"
+  KEYSTORE_PASSWORD: "change-me-keystore"
+---
+# Source: ebms-adapter/charts/ebms-orchestrator/templates/secret.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ebms-ebms-orchestrator-secret
+  namespace: default
+  labels:
+    helm.sh/chart: ebms-orchestrator-1.0.0
+    app.kubernetes.io/name: ebms-orchestrator
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: orchestrator
+    app.kubernetes.io/part-of: ebms-adapter
+  annotations:
+    # In productie: gebruik external-secrets of sealed-secrets i.p.v. plain-text values
+    helm.sh/resource-policy: keep
+type: Opaque
+stringData:
+  SPRING_DATASOURCE_PASSWORD: "change-me-orchestrator"
+  SPRING_RABBITMQ_PASSWORD: "change-me-amqp"
+---
+# Source: ebms-adapter/charts/postgresql/templates/secrets.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ebms-postgresql
+  namespace: "default"
+  labels:
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: postgresql
+    app.kubernetes.io/version: 17.6.0
+    helm.sh/chart: postgresql-16.7.27
+type: Opaque
+data:
+  postgres-password: "Y2hhbmdlLW1lLXBvc3RncmVz"
+  password: "Y2hhbmdlLW1lLWVibXM="
+  # We don't auto-generate LDAP password when it's not provided as we do for other passwords
+---
+# Source: ebms-adapter/charts/rabbitmq/templates/config-secret.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ebms-rabbitmq-config
+  namespace: "default"
+  labels:
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: rabbitmq
+    app.kubernetes.io/version: 3.13.7
+    helm.sh/chart: rabbitmq-14.7.0
+type: Opaque
+data:
+  rabbitmq.conf: |-
+    IyMgVXNlcm5hbWUgYW5kIHBhc3N3b3JkCmRlZmF1bHRfdXNlciA9IGVibXNfYW1xcAojIyBDbHVzdGVyaW5nCiMjCmNsdXN0ZXJfbmFtZSA9IGVibXMtcmFiYml0bXEKY2x1c3Rlcl9mb3JtYXRpb24ucGVlcl9kaXNjb3ZlcnlfYmFja2VuZCAgPSByYWJiaXRfcGVlcl9kaXNjb3ZlcnlfazhzCmNsdXN0ZXJfZm9ybWF0aW9uLms4cy5ob3N0ID0ga3ViZXJuZXRlcy5kZWZhdWx0CmNsdXN0ZXJfZm9ybWF0aW9uLms4cy5hZGRyZXNzX3R5cGUgPSBob3N0bmFtZQpjbHVzdGVyX2Zvcm1hdGlvbi5rOHMuc2VydmljZV9uYW1lID0gZWJtcy1yYWJiaXRtcS1oZWFkbGVzcwpjbHVzdGVyX2Zvcm1hdGlvbi5rOHMuaG9zdG5hbWVfc3VmZml4ID0gLmVibXMtcmFiYml0bXEtaGVhZGxlc3MuZGVmYXVsdC5zdmMuY2x1c3Rlci5sb2NhbApjbHVzdGVyX2Zvcm1hdGlvbi5ub2RlX2NsZWFudXAuaW50ZXJ2YWwgPSAxMApjbHVzdGVyX2Zvcm1hdGlvbi5ub2RlX2NsZWFudXAub25seV9sb2dfd2FybmluZyA9IHRydWUKY2x1c3Rlcl9wYXJ0aXRpb25faGFuZGxpbmcgPSBhdXRvaGVhbAoKIyBxdWV1ZSBtYXN0ZXIgbG9jYXRvcgpxdWV1ZV9tYXN0ZXJfbG9jYXRvciA9IG1pbi1tYXN0ZXJzCiMgZW5hYmxlIGxvb3BiYWNrIHVzZXIKbG9vcGJhY2tfdXNlcnMuZWJtc19hbXFwID0gZmFsc2UKZGVmYXVsdF92aG9zdCA9IGVibXMKIyMgUHJvbWV0aGV1cyBtZXRyaWNzCiMjCnByb21ldGhldXMudGNwLnBvcnQgPSA5NDE5
+---
+# Source: ebms-adapter/charts/rabbitmq/templates/secrets.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ebms-rabbitmq
+  namespace: "default"
+  labels:
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: rabbitmq
+    app.kubernetes.io/version: 3.13.7
+    helm.sh/chart: rabbitmq-14.7.0
+type: Opaque
+data:
+  rabbitmq-password: "Y2hhbmdlLW1lLWFtcXA="
+  rabbitmq-erlang-cookie: "Y2hhbmdlLW1lLWNvb2tpZQ=="
+---
+# Source: ebms-adapter/charts/cpa-service/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ebms-cpa-service-config
+  namespace: default
+  labels:
+    helm.sh/chart: cpa-service-1.0.0
+    app.kubernetes.io/name: cpa-service
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: cpa-service
+    app.kubernetes.io/part-of: ebms-adapter
+data:
+  SPRING_DATASOURCE_URL: "jdbc:postgresql://ebms-postgresql:5432/ebms_cpa"
+  SPRING_DATASOURCE_USERNAME: "ebms"
+---
+# Source: ebms-adapter/charts/crypto-service/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ebms-crypto-service-config
+  namespace: default
+  labels:
+    helm.sh/chart: crypto-service-1.0.0
+    app.kubernetes.io/name: crypto-service
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: crypto-service
+    app.kubernetes.io/part-of: ebms-adapter
+data:
+  SPRING_DATASOURCE_URL: "jdbc:postgresql://ebms-postgresql:5432/ebms_crypto"
+  SPRING_DATASOURCE_USERNAME: "ebms"
+  KEYSTORE_PATH: "/app/keystores/keystore.p12"
+---
+# Source: ebms-adapter/charts/ebms-orchestrator/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ebms-ebms-orchestrator-config
+  namespace: default
+  labels:
+    helm.sh/chart: ebms-orchestrator-1.0.0
+    app.kubernetes.io/name: ebms-orchestrator
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: orchestrator
+    app.kubernetes.io/part-of: ebms-adapter
+data:
+  SPRING_DATASOURCE_URL: "jdbc:postgresql://ebms-postgresql:5432/ebms_orchestrator"
+  SPRING_DATASOURCE_USERNAME: "ebms"
+  SPRING_RABBITMQ_HOST: "ebms-rabbitmq"
+  SPRING_RABBITMQ_PORT: "5672"
+  SPRING_RABBITMQ_USERNAME: "ebms_amqp"
+  SPRING_RABBITMQ_VIRTUAL_HOST: "ebms"
+  CPA_SERVICE_URL: "http://cpa-service:8081"
+  CRYPTO_SERVICE_URL: "http://crypto-service:8082"
+  EBMS_SIGNING_KEY_ALIAS: "signing-key"
+  EBMS_DECRYPTION_KEY_ALIAS: "encryption-key"
+  EBMS_CONNECT_TIMEOUT_MS: "10000"
+  EBMS_READ_TIMEOUT_MS: "30000"
+---
+# Source: ebms-adapter/templates/postgresql-initdb-configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ebms-postgresql-initdb
+  namespace: default
+  labels:
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: ebms-adapter-1.0.0
+data:
+  01_create_databases.sql: |
+    -- ==========================================================================
+    -- ebMS2 Adapter – PostgreSQL initialisatie
+    -- Maakt drie gescheiden databases aan voor de drie microservices.
+    -- Elke service heeft eigen credentials conform Zero-Trust principe.
+    -- ==========================================================================
+
+    -- ebms-orchestrator database
+    CREATE DATABASE ebms_orchestrator
+        WITH OWNER = ebms
+             ENCODING = 'UTF8'
+             LC_COLLATE = 'en_US.utf8'
+             LC_CTYPE = 'en_US.utf8'
+             TEMPLATE = template0;
+    COMMENT ON DATABASE ebms_orchestrator IS 'Berichtopslag ebms-orchestrator';
+
+    -- cpa-service database
+    CREATE DATABASE ebms_cpa
+        WITH OWNER = ebms
+             ENCODING = 'UTF8'
+             LC_COLLATE = 'en_US.utf8'
+             LC_CTYPE = 'en_US.utf8'
+             TEMPLATE = template0;
+    COMMENT ON DATABASE ebms_cpa IS 'CPA-register cpa-service';
+
+    -- crypto-service database
+    CREATE DATABASE ebms_crypto
+        WITH OWNER = ebms
+             ENCODING = 'UTF8'
+             LC_COLLATE = 'en_US.utf8'
+             LC_CTYPE = 'en_US.utf8'
+             TEMPLATE = template0;
+    COMMENT ON DATABASE ebms_crypto IS 'Keystore metadata + audit log crypto-service';
+
+    -- Rechten
+    GRANT ALL PRIVILEGES ON DATABASE ebms_orchestrator TO ebms;
+    GRANT ALL PRIVILEGES ON DATABASE ebms_cpa TO ebms;
+    GRANT ALL PRIVILEGES ON DATABASE ebms_crypto TO ebms;
+---
+# Source: ebms-adapter/charts/rabbitmq/templates/role.yaml
+kind: Role
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: ebms-rabbitmq-endpoint-reader
+  namespace: "default"
+  labels:
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: rabbitmq
+    app.kubernetes.io/version: 3.13.7
+    helm.sh/chart: rabbitmq-14.7.0
+rules:
+  - apiGroups: [""]
+    resources: ["endpoints"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create"]
+---
+# Source: ebms-adapter/charts/rabbitmq/templates/rolebinding.yaml
+kind: RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: ebms-rabbitmq-endpoint-reader
+  namespace: "default"
+  labels:
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: rabbitmq
+    app.kubernetes.io/version: 3.13.7
+    helm.sh/chart: rabbitmq-14.7.0
+subjects:
+  - kind: ServiceAccount
+    name: ebms-rabbitmq
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: ebms-rabbitmq-endpoint-reader
+---
+# Source: ebms-adapter/charts/cpa-service/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: ebms-cpa-service
+  namespace: default
+  labels:
+    helm.sh/chart: cpa-service-1.0.0
+    app.kubernetes.io/name: cpa-service
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: cpa-service
+    app.kubernetes.io/part-of: ebms-adapter
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8081
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    app.kubernetes.io/name: cpa-service
+    app.kubernetes.io/instance: ebms
+---
+# Source: ebms-adapter/charts/crypto-service/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: ebms-crypto-service
+  namespace: default
+  labels:
+    helm.sh/chart: crypto-service-1.0.0
+    app.kubernetes.io/name: crypto-service
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: crypto-service
+    app.kubernetes.io/part-of: ebms-adapter
+  annotations:
+    # crypto-service is uitsluitend intern bereikbaar (Zero-Trust)
+    konghq.com/override: "internal-only"
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8082
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    app.kubernetes.io/name: crypto-service
+    app.kubernetes.io/instance: ebms
+---
+# Source: ebms-adapter/charts/ebms-orchestrator/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: ebms-ebms-orchestrator
+  namespace: default
+  labels:
+    helm.sh/chart: ebms-orchestrator-1.0.0
+    app.kubernetes.io/name: ebms-orchestrator
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: orchestrator
+    app.kubernetes.io/part-of: ebms-adapter
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8080
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    app.kubernetes.io/name: ebms-orchestrator
+    app.kubernetes.io/instance: ebms
+---
+# Source: ebms-adapter/charts/postgresql/templates/primary/svc-headless.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: ebms-postgresql-hl
+  namespace: "default"
+  labels:
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: postgresql
+    app.kubernetes.io/version: 17.6.0
+    helm.sh/chart: postgresql-16.7.27
+    app.kubernetes.io/component: primary
+  annotations:
+spec:
+  type: ClusterIP
+  clusterIP: None
+  # We want all pods in the StatefulSet to have their addresses published for
+  # the sake of the other Postgresql pods even before they're ready, since they
+  # have to be able to talk to each other in order to become ready.
+  publishNotReadyAddresses: true
+  ports:
+    - name: tcp-postgresql
+      port: 5432
+      targetPort: tcp-postgresql
+  selector:
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/name: postgresql
+    app.kubernetes.io/component: primary
+---
+# Source: ebms-adapter/charts/postgresql/templates/primary/svc.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: ebms-postgresql
+  namespace: "default"
+  labels:
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: postgresql
+    app.kubernetes.io/version: 17.6.0
+    helm.sh/chart: postgresql-16.7.27
+    app.kubernetes.io/component: primary
+spec:
+  type: ClusterIP
+  sessionAffinity: None
+  ports:
+    - name: tcp-postgresql
+      port: 5432
+      targetPort: tcp-postgresql
+      nodePort: null
+  selector:
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/name: postgresql
+    app.kubernetes.io/component: primary
+---
+# Source: ebms-adapter/charts/rabbitmq/templates/svc-headless.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: ebms-rabbitmq-headless
+  namespace: "default"
+  labels:
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: rabbitmq
+    app.kubernetes.io/version: 3.13.7
+    helm.sh/chart: rabbitmq-14.7.0
+spec:
+  clusterIP: None
+  ports:
+    - name: epmd
+      port: 4369
+      targetPort: epmd
+    - name: amqp
+      port: 5672
+      targetPort: amqp
+    - name: dist
+      port: 25672
+      targetPort: dist
+    - name: http-stats
+      port: 15672
+      targetPort: stats
+  selector:
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/name: rabbitmq
+  publishNotReadyAddresses: true
+---
+# Source: ebms-adapter/charts/rabbitmq/templates/svc.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: ebms-rabbitmq
+  namespace: "default"
+  labels:
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: rabbitmq
+    app.kubernetes.io/version: 3.13.7
+    helm.sh/chart: rabbitmq-14.7.0
+spec:
+  type: ClusterIP
+  sessionAffinity: None
+  ports:
+    - name: amqp
+      port: 5672
+      targetPort: amqp
+      nodePort: null
+    - name: epmd
+      port: 4369
+      targetPort: epmd
+      nodePort: null
+    - name: dist
+      port: 25672
+      targetPort: dist
+      nodePort: null
+    - name: http-stats
+      port: 15672
+      targetPort: stats
+      nodePort: null
+  selector:
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/name: rabbitmq
+---
+# Source: ebms-adapter/charts/cpa-service/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ebms-cpa-service
+  namespace: default
+  labels:
+    helm.sh/chart: cpa-service-1.0.0
+    app.kubernetes.io/name: cpa-service
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: cpa-service
+    app.kubernetes.io/part-of: ebms-adapter
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cpa-service
+      app.kubernetes.io/instance: ebms
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cpa-service
+        app.kubernetes.io/instance: ebms
+      annotations:
+        checksum/config: d20dd2cba654b58c3007bda39842fbc60747055a0894a31259fa01ecd4da749c
+        checksum/secret: 9e10c6c3c2334abe891ee74eafec1efe335f6c35894be5e7bd66ccfeb7accb4e
+    spec:
+      serviceAccountName: ebms-cpa-service
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: cpa-service
+          image: "192.168.56.10:5555/municipal/ebms-cpa:latest"
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8081
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: ebms-cpa-service-config
+            - secretRef:
+                name: ebms-cpa-service-secret
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            limits:
+              cpu: 500m
+              memory: 512Mi
+            requests:
+              cpu: 125m
+              memory: 256Mi
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: cpa-service
+              app.kubernetes.io/instance: ebms
+---
+# Source: ebms-adapter/charts/crypto-service/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ebms-crypto-service
+  namespace: default
+  labels:
+    helm.sh/chart: crypto-service-1.0.0
+    app.kubernetes.io/name: crypto-service
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: crypto-service
+    app.kubernetes.io/part-of: ebms-adapter
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: crypto-service
+      app.kubernetes.io/instance: ebms
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: crypto-service
+        app.kubernetes.io/instance: ebms
+      annotations:
+        checksum/config: 5d5b6a793a23dab6e1ef940b1d8cbb63e8757d8a01010cf1cad8c899d3de06e2
+        checksum/secret: c1ea7a601c386f1d3692820ea7f4faec5f466828c96de4a311e6b26a69585d24
+    spec:
+      serviceAccountName: ebms-crypto-service
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: crypto-service
+          image: "192.168.56.10:5555/municipal/ebms-crypto:latest"
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8082
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: ebms-crypto-service-config
+            - secretRef:
+                name: ebms-crypto-service-secret
+          volumeMounts:
+            - name: keystore-volume
+              mountPath: /app/keystores
+              readOnly: false
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            initialDelaySeconds: 45
+            periodSeconds: 15
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+            requests:
+              cpu: 250m
+              memory: 512Mi
+      volumes:
+        - name: keystore-volume
+          persistentVolumeClaim:
+            claimName: ebms-crypto-service-keystore
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: crypto-service
+              app.kubernetes.io/instance: ebms
+---
+# Source: ebms-adapter/charts/ebms-orchestrator/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ebms-ebms-orchestrator
+  namespace: default
+  labels:
+    helm.sh/chart: ebms-orchestrator-1.0.0
+    app.kubernetes.io/name: ebms-orchestrator
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: orchestrator
+    app.kubernetes.io/part-of: ebms-adapter
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ebms-orchestrator
+      app.kubernetes.io/instance: ebms
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ebms-orchestrator
+        app.kubernetes.io/instance: ebms
+      annotations:
+        checksum/config: 556617fdd5f1cd6ede7b9d586e577962f2b14e19eb74d458d49f85df604ca8da
+        checksum/secret: b04b58fd9a93833c9d83f1523aacea8ebd2fff5e62cbe3a37926396242464576
+    spec:
+      serviceAccountName: ebms-ebms-orchestrator
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: ebms-orchestrator
+          image: "192.168.56.10:5555/municipal/ebms-orchestrator:latest"
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: ebms-ebms-orchestrator-config
+            - secretRef:
+                name: ebms-ebms-orchestrator-secret
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+            requests:
+              cpu: 250m
+              memory: 512Mi
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: ebms-orchestrator
+              app.kubernetes.io/instance: ebms
+---
+# Source: ebms-adapter/charts/cpa-service/templates/hpa.yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: ebms-cpa-service
+  namespace: default
+  labels:
+    helm.sh/chart: cpa-service-1.0.0
+    app.kubernetes.io/name: cpa-service
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: cpa-service
+    app.kubernetes.io/part-of: ebms-adapter
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ebms-cpa-service
+  minReplicas: 2
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+# Source: ebms-adapter/charts/crypto-service/templates/hpa.yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: ebms-crypto-service
+  namespace: default
+  labels:
+    helm.sh/chart: crypto-service-1.0.0
+    app.kubernetes.io/name: crypto-service
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: crypto-service
+    app.kubernetes.io/part-of: ebms-adapter
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ebms-crypto-service
+  minReplicas: 2
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+# Source: ebms-adapter/charts/ebms-orchestrator/templates/hpa.yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: ebms-ebms-orchestrator
+  namespace: default
+  labels:
+    helm.sh/chart: ebms-orchestrator-1.0.0
+    app.kubernetes.io/name: ebms-orchestrator
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: orchestrator
+    app.kubernetes.io/part-of: ebms-adapter
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ebms-ebms-orchestrator
+  minReplicas: 2
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+# Source: ebms-adapter/charts/postgresql/templates/primary/statefulset.yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: ebms-postgresql
+  namespace: "default"
+  labels:
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: postgresql
+    app.kubernetes.io/version: 17.6.0
+    helm.sh/chart: postgresql-16.7.27
+    app.kubernetes.io/component: primary
+spec:
+  replicas: 1
+  serviceName: ebms-postgresql-hl
+  updateStrategy:
+    rollingUpdate: {}
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: ebms
+      app.kubernetes.io/name: postgresql
+      app.kubernetes.io/component: primary
+  template:
+    metadata:
+      name: ebms-postgresql
+      labels:
+        app.kubernetes.io/instance: ebms
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/name: postgresql
+        app.kubernetes.io/version: 17.6.0
+        helm.sh/chart: postgresql-16.7.27
+        app.kubernetes.io/component: primary
+    spec:
+      serviceAccountName: ebms-postgresql
+      
+      automountServiceAccountToken: false
+      affinity:
+        podAffinity:
+          
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/instance: ebms
+                    app.kubernetes.io/name: postgresql
+                    app.kubernetes.io/component: primary
+                topologyKey: kubernetes.io/hostname
+              weight: 1
+        nodeAffinity:
+          
+      securityContext:
+        fsGroup: 1001
+        fsGroupChangePolicy: Always
+        supplementalGroups: []
+        sysctls: []
+      hostNetwork: false
+      hostIPC: false
+      containers:
+        - name: postgresql
+          image: docker.io/bitnami/postgresql:17.6.0-debian-12-r4
+          imagePullPolicy: "IfNotPresent"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            privileged: false
+            readOnlyRootFilesystem: true
+            runAsGroup: 1001
+            runAsNonRoot: true
+            runAsUser: 1001
+            seLinuxOptions: {}
+            seccompProfile:
+              type: RuntimeDefault
+          env:
+            - name: BITNAMI_DEBUG
+              value: "false"
+            - name: POSTGRESQL_PORT_NUMBER
+              value: "5432"
+            - name: POSTGRESQL_VOLUME_DIR
+              value: "/bitnami/postgresql"
+            - name: PGDATA
+              value: "/bitnami/postgresql/data"
+            # Authentication
+            - name: POSTGRES_USER
+              value: "ebms"
+            - name: POSTGRES_PASSWORD_FILE
+              value: /opt/bitnami/postgresql/secrets/password
+            - name: POSTGRES_POSTGRES_PASSWORD_FILE
+              value: /opt/bitnami/postgresql/secrets/postgres-password
+            - name: POSTGRES_DATABASE
+              value: "ebms_orchestrator"
+            # LDAP
+            - name: POSTGRESQL_ENABLE_LDAP
+              value: "no"
+            # TLS
+            - name: POSTGRESQL_ENABLE_TLS
+              value: "no"
+            # Audit
+            - name: POSTGRESQL_LOG_HOSTNAME
+              value: "false"
+            - name: POSTGRESQL_LOG_CONNECTIONS
+              value: "false"
+            - name: POSTGRESQL_LOG_DISCONNECTIONS
+              value: "false"
+            - name: POSTGRESQL_PGAUDIT_LOG_CATALOG
+              value: "off"
+            # Others
+            - name: POSTGRESQL_CLIENT_MIN_MESSAGES
+              value: "error"
+            - name: POSTGRESQL_SHARED_PRELOAD_LIBRARIES
+              value: "pgaudit"
+          ports:
+            - name: tcp-postgresql
+              containerPort: 5432
+          livenessProbe:
+            failureThreshold: 6
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            successThreshold: 1
+            timeoutSeconds: 5
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - exec pg_isready -U "ebms" -d "dbname=ebms_orchestrator" -h 127.0.0.1 -p 5432
+          readinessProbe:
+            failureThreshold: 6
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            successThreshold: 1
+            timeoutSeconds: 5
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - -e
+                - |
+                  exec pg_isready -U "ebms" -d "dbname=ebms_orchestrator" -h 127.0.0.1 -p 5432
+                  [ -f /opt/bitnami/postgresql/tmp/.initialized ] || [ -f /bitnami/postgresql/.initialized ]
+          resources:
+            limits:
+              cpu: 150m
+              ephemeral-storage: 2Gi
+              memory: 192Mi
+            requests:
+              cpu: 100m
+              ephemeral-storage: 50Mi
+              memory: 128Mi
+          volumeMounts:
+            - name: empty-dir
+              mountPath: /tmp
+              subPath: tmp-dir
+            - name: empty-dir
+              mountPath: /opt/bitnami/postgresql/conf
+              subPath: app-conf-dir
+            - name: empty-dir
+              mountPath: /opt/bitnami/postgresql/tmp
+              subPath: app-tmp-dir
+            - name: custom-init-scripts
+              mountPath: /docker-entrypoint-initdb.d/
+            - name: postgresql-password
+              mountPath: /opt/bitnami/postgresql/secrets/
+            - name: dshm
+              mountPath: /dev/shm
+            - name: data
+              mountPath: /bitnami/postgresql
+      volumes:
+        - name: empty-dir
+          emptyDir: {}
+        - name: postgresql-password
+          secret:
+            secretName: ebms-postgresql
+        - name: custom-init-scripts
+          configMap:
+            name: ebms-postgresql-initdb
+        - name: dshm
+          emptyDir:
+            medium: Memory
+  volumeClaimTemplates:
+    - apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: data
+      spec:
+        accessModes:
+          - "ReadWriteOnce"
+        resources:
+          requests:
+            storage: "8Gi"
+---
+# Source: ebms-adapter/charts/rabbitmq/templates/statefulset.yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: ebms-rabbitmq
+  namespace: "default"
+  labels:
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: rabbitmq
+    app.kubernetes.io/version: 3.13.7
+    helm.sh/chart: rabbitmq-14.7.0
+spec:
+  serviceName: ebms-rabbitmq-headless
+  podManagementPolicy: OrderedReady
+  replicas: 1
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: ebms
+      app.kubernetes.io/name: rabbitmq
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: ebms
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/name: rabbitmq
+        app.kubernetes.io/version: 3.13.7
+        helm.sh/chart: rabbitmq-14.7.0
+      annotations:
+        checksum/config: bdad0bf0c313b679583c8141a77c4c23b83613ff806d1ac68db7541ba89ae7cc
+        checksum/secret: 22fb1d045364f0d8e643c495a794e873c88a35987a04b3e982ef38261a323073
+    spec:
+      
+      serviceAccountName: ebms-rabbitmq
+      affinity:
+        podAffinity:
+          
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/instance: ebms
+                    app.kubernetes.io/name: rabbitmq
+                topologyKey: kubernetes.io/hostname
+              weight: 1
+        nodeAffinity:
+          
+      automountServiceAccountToken: true
+      securityContext:
+        fsGroup: 1001
+        fsGroupChangePolicy: Always
+        supplementalGroups: []
+        sysctls: []
+      terminationGracePeriodSeconds: 120
+      enableServiceLinks: true
+      initContainers:
+        - name: prepare-plugins-dir
+          image: docker.io/bitnami/rabbitmq:3.13.7-debian-12-r2
+          imagePullPolicy: "IfNotPresent"
+          resources:
+            limits:
+              cpu: 500m
+              memory: 512Mi
+            requests:
+              cpu: 250m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+            runAsGroup: 1001
+            runAsNonRoot: true
+            runAsUser: 1001
+            seLinuxOptions: null
+            seccompProfile:
+              type: RuntimeDefault
+          command:
+            - /bin/bash
+          args:
+            - -ec
+            - |
+              #!/bin/bash
+
+              . /opt/bitnami/scripts/liblog.sh
+
+              info "Copying plugins dir to empty dir"
+              # In order to not break the possibility of installing custom plugins, we need
+              # to make the plugins directory writable, so we need to copy it to an empty dir volume
+              cp -r --preserve=mode /opt/bitnami/rabbitmq/plugins/ /emptydir/app-plugins-dir
+          volumeMounts:
+            - name: empty-dir
+              mountPath: /emptydir
+      containers:
+        - name: rabbitmq
+          image: docker.io/bitnami/rabbitmq:3.13.7-debian-12-r2
+          imagePullPolicy: "IfNotPresent"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+            runAsGroup: 1001
+            runAsNonRoot: true
+            runAsUser: 1001
+            seLinuxOptions: null
+            seccompProfile:
+              type: RuntimeDefault
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - /bin/bash
+                  - -ec
+                  - |
+                    if [[ -f /opt/bitnami/scripts/rabbitmq/nodeshutdown.sh ]]; then
+                        /opt/bitnami/scripts/rabbitmq/nodeshutdown.sh -t "120" -d "false"
+                    else
+                        rabbitmqctl stop_app
+                    fi
+          env:
+            - name: BITNAMI_DEBUG
+              value: "false"
+            - name: MY_POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: MY_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: MY_POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: RABBITMQ_FORCE_BOOT
+              value: "no"
+            - name: RABBITMQ_NODE_NAME
+              value: "rabbit@$(MY_POD_NAME).ebms-rabbitmq-headless.$(MY_POD_NAMESPACE).svc.cluster.local"
+            - name: RABBITMQ_MNESIA_DIR
+              value: "/opt/bitnami/rabbitmq/.rabbitmq/mnesia/$(RABBITMQ_NODE_NAME)"
+            - name: RABBITMQ_LDAP_ENABLE
+              value: "no"
+            - name: RABBITMQ_LOGS
+              value: "-"
+            - name: RABBITMQ_ULIMIT_NOFILES
+              value: "65535"
+            - name: RABBITMQ_USE_LONGNAME
+              value: "true"
+            - name: RABBITMQ_ERL_COOKIE
+              valueFrom:
+                secretKeyRef:
+                  name: ebms-rabbitmq
+                  key: rabbitmq-erlang-cookie
+            - name: RABBITMQ_LOAD_DEFINITIONS
+              value: "no"
+            - name: RABBITMQ_DEFINITIONS_FILE
+              value: "/app/load_definition.json"
+            - name: RABBITMQ_SECURE_PASSWORD
+              value: "yes"
+            - name: RABBITMQ_USERNAME
+              value: "ebms_amqp"
+            - name: RABBITMQ_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ebms-rabbitmq
+                  key: rabbitmq-password
+            - name: RABBITMQ_PLUGINS
+              value: "rabbitmq_management, rabbitmq_peer_discovery_k8s, rabbitmq_auth_backend_ldap"
+          envFrom:
+          ports:
+            - name: amqp
+              containerPort: 5672
+            - name: dist
+              containerPort: 25672
+            - name: stats
+              containerPort: 15672
+            - name: epmd
+              containerPort: 4369
+            - name: metrics
+              containerPort: 9419
+          livenessProbe:
+            failureThreshold: 6
+            initialDelaySeconds: 120
+            periodSeconds: 30
+            successThreshold: 1
+            timeoutSeconds: 20
+            exec:
+              command:
+                - sh
+                - -ec
+                - curl -f --user ebms_amqp:$RABBITMQ_PASSWORD 127.0.0.1:15672/api/health/checks/virtual-hosts
+          readinessProbe:
+            failureThreshold: 3
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            successThreshold: 1
+            timeoutSeconds: 20
+            exec:
+              command:
+                - sh
+                - -ec
+                - curl -f --user ebms_amqp:$RABBITMQ_PASSWORD 127.0.0.1:15672/api/health/checks/local-alarms
+          resources:
+            limits:
+              cpu: 500m
+              memory: 512Mi
+            requests:
+              cpu: 250m
+              memory: 256Mi
+          volumeMounts:
+            - name: configuration
+              mountPath: /bitnami/rabbitmq/conf
+            - name: empty-dir
+              mountPath: /tmp
+              subPath: tmp-dir
+            - name: empty-dir
+              mountPath: /opt/bitnami/rabbitmq/etc/rabbitmq
+              subPath: app-conf-dir
+            - name: empty-dir
+              mountPath: /opt/bitnami/rabbitmq/var/lib/rabbitmq
+              subPath: app-tmp-dir
+            - name: empty-dir
+              mountPath: /opt/bitnami/rabbitmq/.rabbitmq/
+              subPath: app-erlang-cookie
+            - name: empty-dir
+              mountPath: /opt/bitnami/rabbitmq/var/log/rabbitmq
+              subPath: app-logs-dir
+            - name: empty-dir
+              mountPath: /opt/bitnami/rabbitmq/plugins
+              subPath: app-plugins-dir
+            - name: data
+              mountPath: /opt/bitnami/rabbitmq/.rabbitmq/mnesia
+      volumes:
+        - name: empty-dir
+          emptyDir: {}
+        - name: configuration
+          projected:
+            sources:
+              - secret:
+                  name: ebms-rabbitmq-config
+  volumeClaimTemplates:
+    - apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: data
+        labels:
+          app.kubernetes.io/instance: ebms
+          app.kubernetes.io/name: rabbitmq
+      spec:
+        accessModes:
+            - "ReadWriteOnce"
+        resources:
+          requests:
+            storage: "8Gi"
+---
+# Source: ebms-adapter/charts/ebms-orchestrator/templates/ingress.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ebms-ebms-orchestrator
+  namespace: default
+  labels:
+    helm.sh/chart: ebms-orchestrator-1.0.0
+    app.kubernetes.io/name: ebms-orchestrator
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: orchestrator
+    app.kubernetes.io/part-of: ebms-adapter
+  annotations:
+    konghq.com/plugins: ebms-rate-limit
+    konghq.com/preserve-host: "true"
+    konghq.com/protocols: https
+    konghq.com/strip-path: "false"
+spec:
+  ingressClassName: "kong"
+  tls:
+    - hosts:
+        - "ebms.example.com"
+      secretName: ebms-tls-cert
+  rules:
+    - host: "ebms.example.com"
+      http:
+        paths:
+          - path: /soap/ebms
+            pathType: Prefix
+            backend:
+              service:
+                name: ebms-ebms-orchestrator
+                port:
+                  name: http
+          - path: /admin
+            pathType: Prefix
+            backend:
+              service:
+                name: ebms-ebms-orchestrator
+                port:
+                  name: http
+          - path: /api/admin
+            pathType: Prefix
+            backend:
+              service:
+                name: ebms-ebms-orchestrator
+                port:
+                  name: http
+          - path: /api/cpa
+            pathType: Prefix
+            backend:
+              service:
+                name: ebms-cpa-service
+                port:
+                  number: 8081
+---
+# Source: ebms-adapter/charts/ebms-orchestrator/templates/ingress.yaml
+# ── KongPlugin: rate-limiting voor het SOAP-endpoint ────────────────────────
+apiVersion: configuration.konghq.com/v1
+kind: KongPlugin
+metadata:
+  name: ebms-rate-limit
+  namespace: default
+  labels:
+    helm.sh/chart: ebms-orchestrator-1.0.0
+    app.kubernetes.io/name: ebms-orchestrator
+    app.kubernetes.io/instance: ebms
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: orchestrator
+    app.kubernetes.io/part-of: ebms-adapter
+plugin: rate-limiting
+config:
+  # Max 100 berichten per minuut per IP (configureer per CPA-profiel in productie)
+  minute: 100
+  policy: local

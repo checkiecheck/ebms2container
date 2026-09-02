@@ -1,17 +1,21 @@
 package nl.logius.ebms.cpa.util;
 
 import lombok.extern.slf4j.Slf4j;
+import java.time.Instant;
+import java.io.StringReader;
+import javax.xml.parsers.DocumentBuilderFactory;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+import org.w3c.dom.NamedNodeMap;
+import org.xml.sax.InputSource;
 import nl.logius.ebms.common.model.cpa.PartyInfoDto;
 import nl.logius.ebms.common.util.OinValidator;
 import nl.logius.ebms.cpa.entity.PartnerCertificateEntity;
 import org.springframework.stereotype.Component;
-import org.w3c.dom.Document;
-import org.w3c.dom.Element;
-import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 
 import javax.xml.parsers.DocumentBuilder;
-import javax.xml.parsers.DocumentBuilderFactory;
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.cert.CertificateFactory;
@@ -41,6 +45,77 @@ public class CpaPartyXmlParser {
      * @param cpaXml het volledige CPA-document als string
      * @return lijst van geëxtraheerde partijen (mogelijk leeg)
      */
+public String parseCpaId(String cpaXml) {
+    if (cpaXml == null || cpaXml.isBlank()) return null;
+    try {
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+        factory.setNamespaceAware(true);
+        Document doc = factory.newDocumentBuilder().parse(new InputSource(new StringReader(cpaXml)));
+        Element root = doc.getDocumentElement();
+        return getLenientAttribute(root, "cpaId");
+    } catch (Exception e) {
+        return null;
+    }
+}
+
+public Instant parseStartDate(String cpaXml) {
+    String dateStr = parseDateAttribute(cpaXml, "Start");
+    try {
+        return dateStr != null ? Instant.parse(dateStr) : null;
+    } catch (java.time.format.DateTimeParseException e) {
+        log.warn("Could not parse start date from CPA XML: {}", dateStr, e);
+        return null;
+    }
+}
+
+public Instant parseEndDate(String cpaXml) {
+    String dateStr = parseDateAttribute(cpaXml, "End");
+    try {
+        return dateStr != null ? Instant.parse(dateStr) : null;
+    } catch (java.time.format.DateTimeParseException e) {
+        log.warn("Could not parse end date from CPA XML: {}", dateStr, e);
+        return null;
+    }
+}
+
+private String parseDateAttribute(String cpaXml, String attributeName) {
+    if (cpaXml == null || cpaXml.isBlank()) return null;
+    try {
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+        factory.setNamespaceAware(true);
+        Document doc = factory.newDocumentBuilder().parse(new InputSource(new StringReader(cpaXml)));
+        Element root = doc.getDocumentElement();
+        
+        // Look for <tns:Start> or <Start> element values inside root
+        org.w3c.dom.NodeList list = root.getElementsByTagNameNS("*", attributeName);
+        if (list.getLength() > 0) {
+            return list.item(0).getTextContent().trim();
+        }
+    } catch (Exception e) {
+        // Fallback or log
+    }
+    return null;
+}
+
+private static String getLenientAttribute(Element element, String attributeName) {
+    if (element == null) return null;
+    NamedNodeMap attributes = element.getAttributes();
+    if (attributes == null) return null;
+    String target = attributeName.toLowerCase();
+    for (int i = 0; i < attributes.getLength(); i++) {
+        Node attr = attributes.item(i);
+        String localName = attr.getLocalName();
+        if (localName == null) {
+            String nodeName = attr.getNodeName();
+            localName = nodeName.contains(":") ? nodeName.substring(nodeName.indexOf(":") + 1) : nodeName;
+        }
+        if (localName.equalsIgnoreCase(target)) {
+            return attr.getNodeValue();
+        }
+    }
+    return null;
+}
+
     public List<PartyInfoDto> parseParties(String cpaXml) {
         if (cpaXml == null || cpaXml.isBlank()) {
             return List.of();

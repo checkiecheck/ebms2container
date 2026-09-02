@@ -169,4 +169,120 @@ class CpaPartyXmlParserTest {
         // return an empty list. No external resource is fetched.
         assertThat(parties).isEmpty();
     }
+// ── Lenient CPA ID parsing ───────────────────────────────────────────
+
+    @Test
+    void parseCpaId_standardCpaId_extractsCorrectly() {
+        String xml = "<CollaborationProtocolAgreement cpaId='test-cpa-id'/>";
+        assertThat(parser.parseCpaId(xml)).isEqualTo("test-cpa-id");
+    }
+
+    @Test
+    void parseCpaId_prefixedCpaId_extractsCorrectly() {
+        String xml = "<tns:CollaborationProtocolAgreement xmlns:tns='http://www.oasis-open.org/committees/ebxml-cppa/schema/cpp-cpa-2_0.xsd' tns:cpaId='test-cpa-id'/>";
+        assertThat(parser.parseCpaId(xml)).isEqualTo("test-cpa-id");
+    }
+
+    @Test
+    void parseCpaId_lowercaseCpaId_extractsCorrectly() {
+        String xml = "<CollaborationProtocolAgreement cpaid='test-cpa-id'/>";
+        assertThat(parser.parseCpaId(xml)).isEqualTo("test-cpa-id");
+    }
+
+    @Test
+    void parseCpaId_prefixedLowercaseCpaId_extractsCorrectly() {
+        String xml = "<tns:CollaborationProtocolAgreement xmlns:tns='http://www.oasis-open.org/committees/ebxml-cppa/schema/cpp-cpa-2_0.0.xsd' tns:cpaid='test-cpa-id'/>";
+        assertThat(parser.parseCpaId(xml)).isEqualTo("test-cpa-id");
+    }
+
+    @Test
+    void parseCpaId_noCpaId_returnsNull() {
+        String xml = "<CollaborationProtocolAgreement/>";
+        assertThat(parser.parseCpaId(xml)).isNull();
+    }
+
+    @Test
+    void parseCpaId_emptyCpaId_returnsEmptyString() {
+        String xml = "<CollaborationProtocolAgreement cpaId=''/>";
+        assertThat(parser.parseCpaId(xml)).isEqualTo("");
+    }
+
+    @Test
+    void parseCpaId_nullInput_returnsNull() {
+        assertThat(parser.parseCpaId(null)).isNull();
+    }
+
+    @Test
+    void parseCpaId_blankInput_returnsNull() {
+        assertThat(parser.parseCpaId("   ")).isNull();
+    }
+
+    @Test
+    void parseCpaId_malformedXml_returnsNull() {
+        assertThat(parser.parseCpaId("<Root><Unclosed>")).isNull();
+    }
+
+    // ── Date parsing ─────────────────────────────────────────────────────
+
+    @Test
+    void parseStartDate_validDate_extractsCorrectly() {
+        String xml = "<CollaborationProtocolAgreement><Start>2023-01-01T00:00:00Z</Start></CollaborationProtocolAgreement>";
+        assertThat(parser.parseStartDate(xml)).isEqualTo(java.time.Instant.parse("2023-01-01T00:00:00Z"));
+    }
+
+    @Test
+    void parseEndDate_validDate_extractsCorrectly() {
+        String xml = "<CollaborationProtocolAgreement><End>2024-12-31T23:59:59Z</End></CollaborationProtocolAgreement>";
+        assertThat(parser.parseEndDate(xml)).isEqualTo(java.time.Instant.parse("2024-12-31T23:59:59Z"));
+    }
+
+    @Test
+    void parseStartDate_prefixedDateElement_extractsCorrectly() {
+        String xml = "<tns:CollaborationProtocolAgreement xmlns:tns='http://x'><tns:Start>2023-01-01T00:00:00Z</tns:Start></tns:CollaborationProtocolAgreement>";
+        assertThat(parser.parseStartDate(xml)).isEqualTo(java.time.Instant.parse("2023-01-01T00:00:00Z"));
+    }
+
+    @Test
+    void parseEndDate_prefixedDateElement_extractsCorrectly() {
+        String xml = "<tns:CollaborationProtocolAgreement xmlns:tns='http://x'><tns:End>2024-12-31T23:59:59Z</tns:End></tns:CollaborationProtocolAgreement>";
+        assertThat(parser.parseEndDate(xml)).isEqualTo(java.time.Instant.parse("2024-12-31T23:59:59Z"));
+    }
+
+    @Test
+    void parseStartDate_noDateElement_returnsNull() {
+        String xml = "<CollaborationProtocolAgreement/>";
+        assertThat(parser.parseStartDate(xml)).isNull();
+    }
+
+    @Test
+    void parseEndDate_noDateElement_returnsNull() {
+        String xml = "<CollaborationProtocolAgreement/>";
+        assertThat(parser.parseEndDate(xml)).isNull();
+    }
+
+    @Test
+    void parseStartDate_emptyDateElement_returnsEmptyString() {
+        String xml = "<CollaborationProtocolAgreement><Start></Start></CollaborationProtocolAgreement>";
+        assertThat(parser.parseStartDate(xml)).isNull(); // Instant.parse will fail on empty string
+    }
+
+    @Test
+    void parseEndDate_emptyDateElement_returnsEmptyString() {
+        String xml = "<CollaborationProtocolAgreement><End></End></CollaborationProtocolAgreement>";
+        assertThat(parser.parseEndDate(xml)).isNull(); // Instant.parse will fail on empty string
+    }
+
+    @Test
+    void parseStartDate_malformedDate_returnsNull() {
+        String xml = "<CollaborationProtocolAgreement><Start>INVALID_DATE</Start></CollaborationProtocolAgreement>";
+        assertThat(parser.parseStartDate(xml)).isNull();
+    }
+
+    @Test
+    void parseEndDate_malformedDate_returnsNull() {
+        String xml = "<CollaborationProtocolAgreement><End>INVALID_DATE</End></CollaborationProtocolAgreement>";
+        assertThat(parser.parseEndDate(xml)).isNull();
+    }
+
+
 }
