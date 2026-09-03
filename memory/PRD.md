@@ -551,7 +551,21 @@ INBOUND bericht dat vastzat op PROCESSING liep elke ~10 minuten in een eindeloze
   stack is en kon niet garanderen dat verwijderen veilig is voor preview/health-checks/deployment
   → geëscaleerd naar support@emergent.sh, mappen vooralsnog ongewijzigd gelaten.
 
-### P0 – Fase 4: auditor-service (NIEUW)
+### P0 – Fase 4: auditor-service (GEPARKEERD IN BACKLOG)
+- **Discussie (augustus 2026):** gebruiker wil niet noodzakelijk een eigen microservice bouwen
+  om `ebms.audit.events` (queue bestaat al, zie `RabbitMqConfig.QUEUE_AUDIT`, gepubliceerd door
+  orchestrator + crypto-service, nog geen consumer) te persisteren. Besproken alternatieven:
+  1. `@RabbitListener` of Camel-route binnen bestaande `ebms-orchestrator` → nieuwe `audit_event`
+     tabel in `postgres-orch` (geen nieuwe service/poort/DB).
+  2. Logstash met `rabbitmq` input-plugin als brug queue → ELK (Filebeat kan dit NIET, Filebeat's
+     RabbitMQ-module parsed alleen RabbitMQ's eigen server-logbestanden, niet AMQP-queue-inhoud).
+  3. **Aanbevolen, laagste moeite:** gestructureerde JSON audit-logregel (met tag/veld
+     `event_type=AUDIT`) loggen op de 5 `publishAudit()` call-sites in `OrchestratorService`/
+     `OutboundMessageService`/crypto-service, naast de queue-publish. Gebruiker heeft Filebeat al
+     aan ELK gekoppeld – die pikt dit automatisch op via het bestaande log-pad, geen nieuwe infra.
+  - **Status: geparkeerd in backlog, geen implementatie nu.** Onderstaande scope (losse
+    microservice) blijft staan als optie voor later, maar optie 3 hierboven heeft de voorkeur
+    zodra dit weer wordt opgepakt.
 - [ ] Aparte Spring Boot microservice op poort 8083 voor append-only audit-events
 - [ ] Verwerkt `AuditEvent` AMQP-berichten van orchestrator en crypto-service
 - [ ] PostgreSQL-schema met `audit_event` tabel
