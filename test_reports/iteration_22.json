@@ -1,0 +1,28 @@
+{
+  "summary": "Validated iteration-22 changes to /app/ebms-adapter/ebms-orchestrator/src/main/resources/static/admin/index.html: (a) cpaId now extracted via namespace-agnostic getLenientAttribute -> avoids the HTTP 409 on overwrite; (b) new Delete CPA button + confirm modal wired correctly. Served static admin dashboard via python http.server:8765; injected a fetch mock that mimics cpa-service (GET/POST/PUT/DELETE) since the Java stack (Spring Boot + PostgreSQL + RabbitMQ) is not runnable inside this preview pod (no docker, no postgres). Executed the full round-trip flow for 3 namespace variants: tp: prefix (TEST-CPA-409), no prefix (TEST-CPA-PLAIN), and cpa: prefix (TEST-CPA-CPANS). All three: first upload -> POST 201 (no 409), edit End date + re-upload same file -> UI detected exists, showed data-testid=overwrite-confirm-modal, click confirm -> PUT 200 with the new endDate persisted; Delete button (data-testid=cpa-delete-button) opens data-testid=delete-confirm-modal with the correct cpaId in data-testid=delete-modal-cpa-id; Cancel keeps CPA; Confirm triggers DELETE, backend mock returns 204, UI resets (cpaMeta shows 'Nog geen CPA geladen', networkMap shows 'Geen partijen om te tonen.', cpa-status-toggle-wrap hidden, cpa-upload-button disabled); subsequent GET /api/cpa/{id} returns 404. parseCpaXml also verified directly returning correct cpaId+partyName for all 3 namespace variants (regression check for the previously-fixed partyName lenient parsing).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": ["/tmp/cpa_tp.xml", "/tmp/cpa_plain.xml", "/tmp/cpa_cpans.xml"],
+  "action_items": [
+    "Optional: The Java stack could not be started in this pod (needs docker-compose with PostgreSQL x2 + RabbitMQ). Consider a slim H2/testcontainers profile for future automated end-to-end tests. Live backend PUT/DELETE were NOT hit against the real Spring Boot service; only against a JS fetch mock that replicates the expected contract."
+  ],
+  "critical_code_review_comments": [
+    "getLenientAttribute is now correctly reused for both cpaId (line 371) and partyName (line 383) in parseCpaXml. Case-insensitive localName lookup handles any namespace prefix.",
+    "Consistency note (out of scope, not a bug): Status@value (line 374), PartyId@type (line 386), Endpoint@uri (line 389), and Certificate/X509Certificate lookups still use plain getAttribute and getElementsByTagNameNS. In the tp:-prefixed fixture this made Status/oinType/endpoint come back empty because they are prefixed attributes (tp:value/tp:type/tp:uri). Not a regression from this iteration, but visible in the CPA-details UI. Applying getLenientAttribute here as well would round out the fix.",
+    "Delete modal handler correctly nulls lastParsedCpa/lastRawXml/currentCpaDto, resets meta+network map placeholders, hides status toggle wrap, and disables cpaUploadBtn - matches spec.",
+    "showDeleteConfirm/showOverwriteConfirm properly add+remove listeners via cleanup(); no listener leak on repeated open/close cycles.",
+    "Delete flow accepts !res.ok && res.status !== 204 correctly (204 is technically ok in fetch so the second check is defensive)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (Java stack not runnable in pod; contract-tested via mock, all 4 verbs behave per API contract)", "frontend": "100% (3/3 namespace variants pass overwrite + delete flows; parseCpaXml cpaId+partyName correct for all)"},
+  "test_credentials": "N/A",
+  "seed_data_creation": "/tmp/cpa_tp.xml (tp: prefix, cpaId TEST-CPA-409), /tmp/cpa_plain.xml (no namespace prefix, cpaId TEST-CPA-PLAIN), /tmp/cpa_cpans.xml (cpa: prefix, cpaId TEST-CPA-CPANS). Plus *_v2.xml variants with End replaced by 2030-01-01T00:00:00Z for the overwrite path.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Static admin served via `python3 -m http.server 8765` from /app/ebms-adapter/ebms-orchestrator/src/main/resources/static. A fetch mock was injected via page.add_init_script (in-memory store: GET/POST/PUT/DELETE on /api/cpa[/id]). If a future task requires the real Java backend, note: pod has openjdk-17 + maven but no docker/postgres/rabbit; the app requires 2 postgres DBs (ports 5433/5434) and RabbitMQ. cpa-service jar already built at /app/ebms-adapter/cpa-service/target/cpa-service-1.0.0-SNAPSHOT.jar; ebms-orchestrator has classes only (no jar).",
+  "rca of the issue": "Original bug: cpaUploadBtn.onclick calls parseCpaXml which extracts cpaId; before the fix it used root.getAttribute('cpaid')||root.getAttribute('cpaId'), missing any XML where the attribute is namespace-prefixed like tp:cpaId. Result: cpaId parsed as '(onbekend)', GET /api/cpa/(onbekend) returned 404, code took the POST branch, backend correctly rejected the duplicate real cpaId (which was in the XML body) with 409 CPA_ALREADY_EXISTS. Fix: reuse getLenientAttribute(root,'cpaId') which iterates root.attributes and matches on localName case-insensitively, correctly resolving cpaId regardless of prefix. Verified: with tp:cpaId, plain cpaId, cpa:cpaId - all three now yield the correct id, so the GET-check returns 200, the UI shows the overwrite-confirm-modal, and the subsequent request is a PUT (not a POST), persisting the new end date."
+}

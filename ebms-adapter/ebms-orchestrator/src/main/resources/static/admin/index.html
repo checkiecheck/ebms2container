@@ -123,8 +123,14 @@
             <p class="text-xs text-slate-500">Huidige status</p>
             <p id="cpaCurrentStatusLabel" data-testid="cpa-current-status-label" class="font-medium"></p>
           </div>
-          <button id="cpaStatusToggleBtn" data-testid="cpa-status-toggle-button"
-            class="px-4 py-2 rounded-md text-sm font-medium transition-colors"></button>
+          <div class="flex items-center gap-2">
+            <button id="cpaStatusToggleBtn" data-testid="cpa-status-toggle-button"
+              class="px-4 py-2 rounded-md text-sm font-medium transition-colors"></button>
+            <button id="cpaDeleteBtn" data-testid="cpa-delete-button"
+              class="px-4 py-2 rounded-md text-sm font-medium border border-red-800 text-red-400 hover:bg-red-950/60 transition-colors">
+              Verwijderen
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -157,6 +163,30 @@
         <button id="overwriteConfirmBtn" data-testid="overwrite-confirm-button"
           class="px-4 py-2 rounded-md bg-amber-600 hover:bg-amber-500 text-slate-950 font-medium text-sm transition-colors">
           Overschrijven
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Verwijder-bevestiging (CPA delete) -->
+  <div id="deleteModal" data-testid="delete-confirm-modal"
+    class="hidden fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-6 z-50">
+    <div class="bg-slate-900 border border-slate-700 rounded-lg max-w-md w-full">
+      <div class="px-5 py-4 border-b border-slate-800">
+        <h2 class="font-semibold text-slate-100">CPA verwijderen</h2>
+      </div>
+      <div class="p-5 text-sm text-slate-300">
+        <p>Weet je zeker dat je CPA <span id="deleteModalCpaId" data-testid="delete-modal-cpa-id" class="text-red-400 font-medium"></span>
+          permanent wilt verwijderen? Dit kan niet ongedaan worden gemaakt.</p>
+      </div>
+      <div class="flex justify-end gap-2 px-5 py-4 border-t border-slate-800">
+        <button id="deleteCancelBtn" data-testid="delete-cancel-button"
+          class="px-4 py-2 rounded-md border border-slate-700 hover:bg-slate-800 text-sm transition-colors">
+          Annuleren
+        </button>
+        <button id="deleteConfirmBtn" data-testid="delete-confirm-button"
+          class="px-4 py-2 rounded-md bg-red-600 hover:bg-red-500 text-slate-950 font-medium text-sm transition-colors">
+          Verwijderen
         </button>
       </div>
     </div>
@@ -338,7 +368,7 @@
       }
 
       const root = doc.documentElement;
-      const cpaId = root.getAttribute('cpaid') || root.getAttribute('cpaId') || '(onbekend)';
+      const cpaId = getLenientAttribute(root, 'cpaId') || '(onbekend)';
 
       const statusEl = doc.getElementsByTagNameNS('*', 'Status')[0];
       const status = statusEl ? (statusEl.getAttribute('value') || statusEl.textContent.trim()) : 'onbekend';
@@ -490,6 +520,61 @@
         setUploadStatus(`Status van ${saved.cpaId} gewijzigd naar ${saved.status}.`, 'success');
       } catch (err) {
         setUploadStatus(`Status wijzigen mislukt: ${err.message}`, 'error');
+      }
+    };
+
+    // ── Verwijder-bevestiging (CPA delete) ─────────────────────────────────────
+    function showDeleteConfirm(cpaId) {
+      return new Promise((resolve) => {
+        const modal = document.getElementById('deleteModal');
+        document.getElementById('deleteModalCpaId').textContent = cpaId;
+        modal.classList.remove('hidden');
+
+        const confirmBtn = document.getElementById('deleteConfirmBtn');
+        const cancelBtn = document.getElementById('deleteCancelBtn');
+
+        const cleanup = (result) => {
+          modal.classList.add('hidden');
+          confirmBtn.removeEventListener('click', onConfirm);
+          cancelBtn.removeEventListener('click', onCancel);
+          resolve(result);
+        };
+        const onConfirm = () => cleanup(true);
+        const onCancel = () => cleanup(false);
+
+        confirmBtn.addEventListener('click', onConfirm);
+        cancelBtn.addEventListener('click', onCancel);
+      });
+    }
+
+    document.getElementById('deleteModal').addEventListener('click', (e) => {
+      if (e.target.id === 'deleteModal') document.getElementById('deleteCancelBtn').click();
+    });
+
+    document.getElementById('cpaDeleteBtn').onclick = async () => {
+      if (!currentCpaDto || !currentCpaDto.cpaId) return;
+      const cpaId = currentCpaDto.cpaId;
+      const confirmed = await showDeleteConfirm(cpaId);
+      if (!confirmed) return;
+
+      setUploadStatus(`CPA ${cpaId} verwijderen...`, 'info');
+      try {
+        const res = await fetch(`${CPA_API_URL}/${encodeURIComponent(cpaId)}`, { method: 'DELETE' });
+        if (!res.ok && res.status !== 204) {
+          const text = await res.text();
+          throw new Error(`HTTP ${res.status}: ${text || res.statusText}`);
+        }
+        lastParsedCpa = null;
+        lastRawXml = null;
+        currentCpaDto = null;
+        document.getElementById('cpaMeta').innerHTML =
+          'Nog geen CPA geladen — upload een bestand of zoek op CPA ID.';
+        document.getElementById('cpaNetworkMap').innerHTML = 'Geen partijen om te tonen.';
+        document.getElementById('cpaStatusToggleWrap').classList.add('hidden');
+        document.getElementById('cpaUploadBtn').disabled = true;
+        setUploadStatus(`CPA ${cpaId} verwijderd.`, 'success');
+      } catch (err) {
+        setUploadStatus(`Verwijderen mislukt: ${err.message}`, 'error');
       }
     };
 

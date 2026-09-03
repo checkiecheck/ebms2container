@@ -551,6 +551,30 @@ INBOUND bericht dat vastzat op PROCESSING liep elke ~10 minuten in een eindeloze
   stack is en kon niet garanderen dat verwijderen veilig is voor preview/health-checks/deployment
   → geëscaleerd naar support@emergent.sh, mappen vooralsnog ongewijzigd gelaten.
 
+### Bugfix: CPA overschrijven gaf HTTP 409 in plaats van PUT (voltooid – augustus 2026)
+- Root cause: zelfde patroon als de partyName-bug, maar op `cpaId`. `parseCpaXml()` gebruikte
+  `root.getAttribute('cpaid') || root.getAttribute('cpaId')` – faalde bij een namespace-prefix op
+  het `cpaId`-attribuut (bv. `tp:cpaId`). Resultaat: UI parsede `(onbekend)`, GET-existence-check
+  gaf 404, UI koos de POST-tak, backend zag de échte (correct geparste) cpaId al bestaan → 409
+  `CPA_ALREADY_EXISTS`.
+- [x] `cpaId`-extractie hergebruikt nu dezelfde `getLenientAttribute()` helper als de partyName-fix.
+- [x] **Nieuw:** "CPA verwijderen"-knop toegevoegd in admin UI (`cpa-delete-button`), met
+  bevestigingsmodal (`delete-confirm-modal`), gekoppeld aan bestaande backend
+  `DELETE /api/cpa/{cpaId}` (bestond al, had alleen geen UI-knop). Na verwijderen wordt de UI
+  volledig gereset (meta/netwerkkaart/status-toggle/upload-knop).
+- **Testing_agent verificatie (geslaagd, front-end):** 3/3 namespace-varianten (`tp:`, geen prefix,
+  `cpa:`) doorlopen upload→409-vermeden→overschrijf-modal→PUT met nieuwe einddatum, en volledige
+  delete-flow (confirm/cancel/reset/404-na-delete). Getest via een fetch-mock die het echte
+  cpa-service-contract nabootst (Java-stack niet draaiend te krijgen in test-pod: geen
+  docker/postgres/rabbitmq beschikbaar, alleen openjdk-17+maven). **Live PUT/DELETE dus niet tegen
+  de echte Spring Boot-service getest**, wel tegen de exacte API-contracten uit `CpaController`/
+  `CpaService`.
+- **Bekend, niet opgelost (gerapporteerd door testing_agent, buiten scope van deze fix):**
+  `Status@value`, `PartyId@type`, `Endpoint@uri` gebruiken nog plain `getAttribute()`/
+  `getElementsByTagNameNS` en zouden bij een geprefixed CPA-document (bv. `tp:value`, `tp:type`,
+  `tp:uri`) leeg terugkomen in de CPA-details UI. Zelfde bugpatroon, nog niet gefixed – kandidaat
+  voor een volgende beurt als gebruiker dit ook wil oplossen.
+
 ### P0 – Fase 4: auditor-service (GEPARKEERD IN BACKLOG)
 - **Discussie (augustus 2026):** gebruiker wil niet noodzakelijk een eigen microservice bouwen
   om `ebms.audit.events` (queue bestaat al, zie `RabbitMqConfig.QUEUE_AUDIT`, gepubliceerd door
