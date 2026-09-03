@@ -317,6 +317,19 @@
     let lastParsedCpa = null;
     let lastRawXml = null;
 
+    /** Leest een attribuut op naam op, ongeacht het gebruikte namespace-prefix (bv. tp:partyName). */
+    function getLenientAttribute(element, attributeName) {
+      if (!element || !element.attributes) return null;
+      const target = attributeName.toLowerCase();
+      for (const attr of Array.from(element.attributes)) {
+        const localName = attr.localName || (attr.name.includes(':') ? attr.name.split(':').pop() : attr.name);
+        if (localName.toLowerCase() === target) {
+          return attr.value;
+        }
+      }
+      return null;
+    }
+
     /** Namespace-agnostige CPA XML-parser (OASIS ebXML CPPA v2.0 / Digikoppeling). */
     function parseCpaXml(xmlString) {
       const doc = new DOMParser().parseFromString(xmlString, 'application/xml');
@@ -337,7 +350,7 @@
 
       const partyEls = Array.from(doc.getElementsByTagNameNS('*', 'PartyInfo'));
       const parties = partyEls.map((p) => {
-        const name = p.getAttribute('tp:partyName') || p.getAttribute('partyName') || p.getAttribute('PartyName') || '(onbekende partij)';
+        const name = getLenientAttribute(p, 'partyName') || '(onbekende partij)';
         const partyIdEl = p.getElementsByTagNameNS('*', 'PartyId')[0];
         const oin = partyIdEl ? partyIdEl.textContent.trim() : '(geen OIN)';
         const oinType = partyIdEl ? (partyIdEl.getAttribute('type') || '') : '';

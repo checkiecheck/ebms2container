@@ -531,6 +531,26 @@ INBOUND bericht dat vastzat op PROCESSING liep elke ~10 minuten in een eindeloze
   test-berichten naar het verkeerde exchange/routing-key (`amq.default`+`ebms.outbound` i.p.v.
   `ebms.exchange`+`outbound`) – gebruiker fixt dit zelf in het testscript, geen app-wijziging.
 
+### Bugfix: CPA admin UI toonde "(onbekende partij)" i.p.v. organisatienaam (voltooid – augustus 2026)
+- Root cause: `parseCpaXml()` in `admin/index.html` gebruikte hardcoded prefix-checks
+  (`p.getAttribute('tp:partyName') || p.getAttribute('partyName') || p.getAttribute('PartyName')`)
+  – faalde zodra het CPA-document een ander/geen namespace-prefix gebruikte op het
+  `partyName`-attribuut van `<PartyInfo>`.
+- [x] Nieuwe namespace-agnostische helper `getLenientAttribute(element, attributeName)` toegevoegd
+  in `admin/index.html` (spiegelt bestaande server-side `CpaPartyXmlParser.getLenientAttribute`),
+  itereert over `element.attributes` en matcht op lokale naam (na `:`), case-insensitief.
+- **Gebruikerskeuze:** alleen `partyName`-extractie gefixt; `cpaId`-extractie (zelfde
+  kwetsbaarheidspatroon) bewust ongewijzigd gelaten op verzoek van gebruiker.
+- **Testing_agent verificatie (geslaagd):** 3/3 CPA XML-varianten (geen prefix, `tp:` prefix,
+  willekeurig `cpa:` prefix) tonen correcte organisatienaam. Geen regressies op cpaId/status/
+  data/OIN/endpoint/certificaat-rendering. Bekend, niet-gerelateerd pre-existing gedrag genoteerd:
+  bij 1 partij in de CPA dupliceert `renderNetworkMap` deze partij als zowel sender als receiver.
+- Platform-vraag (niet code-gerelateerd): gebruiker vroeg of de ongebruikte scaffold-mappen
+  `/app/frontend` (React) en `/app/backend` (FastAPI) verwijderd kunnen worden, omdat dit Java-
+  project ze niet gebruikt. Support bevestigde dat Java/Spring Boot geen officieel ondersteunde
+  stack is en kon niet garanderen dat verwijderen veilig is voor preview/health-checks/deployment
+  → geëscaleerd naar support@emergent.sh, mappen vooralsnog ongewijzigd gelaten.
+
 ### P0 – Fase 4: auditor-service (NIEUW)
 - [ ] Aparte Spring Boot microservice op poort 8083 voor append-only audit-events
 - [ ] Verwerkt `AuditEvent` AMQP-berichten van orchestrator en crypto-service

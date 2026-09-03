@@ -1,0 +1,24 @@
+{
+  "summary": "Verified JS fix in admin/index.html: getLenientAttribute helper correctly extracts partyName across namespace variants. Served static admin dashboard via python http.server on :8765 (Java backend not running - out of scope). Tested 3 CPA XML variants via file upload flow using data-testid selectors. All party names rendered correctly, no '(onbekende partij)' fallback observed. cpaId out-of-scope behavior confirmed unchanged as instructed.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": ["/tmp/cpa1.xml", "/tmp/cpa2.xml", "/tmp/cpa3.xml"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "getLenientAttribute helper is correctly namespace-agnostic (uses attr.localName with fallback to split(':')). Case-insensitive match works. Fix is minimal and safe.",
+    "Out of scope but noted: cpaId, Status@value, PartyId@type, Endpoint@uri, Certificate use similar namespaced-attribute lookups that would benefit from the same helper. Per user instruction NOT flagged as a bug in this iteration; can be addressed in a future pass if desired.",
+    "renderNetworkMap fallback: when only 1 party exists, it duplicates the same party as both sender & receiver (targets = [sender]). This is a pre-existing behavior, not a regression - visible in cpa2/cpa3 screenshots."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (not tested per request)", "frontend": "100% (3/3 XML variants pass party-name rendering)"},
+  "test_credentials": "N/A",
+  "seed_data_creation": "Created /tmp/cpa1.xml (no ns), /tmp/cpa2.xml (tp: prefix), /tmp/cpa3.xml (cpa: prefix) as test CPA XMLs.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Java backend was not built/started (no JDK/Maven in pod). Tested static admin/index.html by serving via `python3 -m http.server 8765` from /app/ebms-adapter/ebms-orchestrator/src/main/resources/static and interacting with data-testid=tab-cpa-button + #fileInput + data-testid=cpa-party-node-*. The partyName fix (getLenientAttribute at line ~321) works for no-prefix, tp: prefix, and arbitrary cpa: prefix.",
+  "rca of the issue": "Original code used p.getAttribute('tp:partyName') || p.getAttribute('partyName') || p.getAttribute('PartyName'), which is a hardcoded prefix list and misses any other namespace prefix. Fix introduces getLenientAttribute() iterating element.attributes and matching by localName case-insensitively, correctly handling all namespace prefixes."
+}
