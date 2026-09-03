@@ -575,6 +575,23 @@ INBOUND bericht dat vastzat op PROCESSING liep elke ~10 minuten in een eindeloze
   `tp:uri`) leeg terugkomen in de CPA-details UI. Zelfde bugpatroon, nog niet gefixed – kandidaat
   voor een volgende beurt als gebruiker dit ook wil oplossen.
 
+### Bugfix: CPA overschrijven (PUT) gaf HTTP 500 na succesvolle DB-save (voltooid – september 2026)
+- Root cause: `@CacheEvict(value = "cpa-by-id", key = "#cpaIdFromXml")` op `CpaService.update()`
+  verwees naar `cpaIdFromXml`, een **lokale variabele** (pas berekend binnen de methode-body),
+  niet naar een methode-parameter. Spring's cache-SpEL kan alleen parameters/`#result` lezen →
+  key evalueerde naar `null` → `IllegalArgumentException` ná de (al succesvolle) DB-save, dus de
+  gebruiker zag een 500 terwijl de CPA-update al was doorgevoerd (bevestigd door reproductietest).
+- [x] Fix: `key = "#result.cpaId"` (post-invocation referentie naar het teruggegeven CpaDto,
+  geldig omdat `@CacheEvict` standaard `beforeInvocation=false` gebruikt).
+- **Testing_agent verificatie (geslaagd):** nieuwe `CpaServiceUpdateCacheEvictTest` (met échte
+  Spring cache-proxy via `@EnableCaching` + `ConcurrentMapCacheManager` – bestaande pure
+  Mockito-tests missen dit soort AOP-bugs) reproduceert de exacte crash met de oude key en slaagt
+  met de fix. 79/79 cpa-service tests groen. Bijkomende infra-fix: `cpa-service/pom.xml` erfde
+  de `maven-compiler-plugin`-config niet van de root-`pluginManagement`, waardoor Lombok's
+  annotation processor bij een schone build niet actief was – geactiveerd, los van deze bug.
+- **Werkafspraak (vanaf september 2026):** vóór elke wijziging eerst impact (bestanden/
+  componenten/risico) uitleggen en op akkoord wachten voordat de wijziging wordt uitgevoerd.
+
 ### P0 – Fase 4: auditor-service (GEPARKEERD IN BACKLOG)
 - **Discussie (augustus 2026):** gebruiker wil niet noodzakelijk een eigen microservice bouwen
   om `ebms.audit.events` (queue bestaat al, zie `RabbitMqConfig.QUEUE_AUDIT`, gepubliceerd door

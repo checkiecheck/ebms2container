@@ -1,0 +1,41 @@
+{
+  "summary": "Backend-only verification of the @CacheEvict SpEL fix on CpaService.update() (cpa-service module, Spring Boot 3.4 + Java 17). Wrote a new Spring-context slice test (CpaServiceUpdateCacheEvictTest) that (a) reproduces the exact user-reported IllegalArgumentException 'Null key returned for cache operation ... key=#cpaIdFromXml' when the fix is reverted, and (b) passes with the current fix key='#result.cpaId', proving the cache-evict SpEL now resolves and the correct cache entry is actually evicted. All 79 tests in cpa-service pass (including the pre-existing 10 CpaServiceUpdateTest Mockito tests covering create/update/updateStatus/deleteByCpaId regressions).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "N/A (build)", "issue": "cpa-service/pom.xml did not inherit maven-compiler-plugin from parent's <pluginManagement>, so Lombok annotation processor was not activated on clean builds. Added an empty <plugin> stanza to activate inherited config. This was pre-existing and unrelated to the CacheEvict fix, but blocked fresh compilation."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/ebms-adapter/cpa-service/src/test/java/nl/logius/ebms/cpa/service/CpaServiceUpdateCacheEvictTest.java",
+    "/app/test_reports/pytest/TEST-nl.logius.ebms.cpa.service.CpaServiceUpdateCacheEvictTest.xml",
+    "/app/test_reports/pytest/TEST-nl.logius.ebms.cpa.service.CpaServiceUpdateTest.xml",
+    "/app/test_reports/pytest/TEST-nl.logius.ebms.cpa.controller.CpaControllerUpdateTest.xml"
+  ],
+  "action_items": [
+    "Fix confirmed. No action required from main agent for the CacheEvict bug.",
+    "Consider keeping the maven-compiler-plugin stanza I added in cpa-service/pom.xml (or move compiler config out of <pluginManagement> in the root pom) so clean multi-module builds don't silently drop the Lombok annotation processor path."
+  ],
+  "critical_code_review_comments": [
+    "The @CacheEvict(key = \"#result.cpaId\") fix is correct because @CacheEvict defaults to beforeInvocation=false, which means SpEL is evaluated AFTER the method returns and #result is available. The updated CpaDto returned by update() carries the parsed cpaId, so eviction targets exactly the right cache key.",
+    "One residual concern (not part of this bug but worth noting): if update() throws BEFORE returning (e.g. CpaNotFoundException, EbmsException on invalid XML), @CacheEvict with beforeInvocation=false will NOT evict. That's actually the desired behavior here (no DB change => no cache invalidation needed), so this is correct.",
+    "The reported user log line 'CPA overschreven: ... gesynchroniseerd uit XML' is printed AT line 233 BEFORE the method returns, so with the old bug the DB save + log both succeeded and only the cache-evict aspect (post-invocation) crashed => user saw a 500 despite the DB write. The fix restores correct behavior end-to-end.",
+    "Test rigor: my new test intentionally uses a real Spring cache proxy (via @SpringJUnitConfig + @EnableCaching + ConcurrentMapCacheManager). Pure Mockito tests like the existing CpaServiceUpdateTest CANNOT catch this class of bug because they inject the raw bean without the CacheAspect proxy — the existing 10 tests all passed even with the buggy annotation. Recommend adopting this pattern for any future @Cacheable/@CacheEvict changes."
+  ],
+  "updated_files": [
+    "/app/ebms-adapter/cpa-service/src/test/java/nl/logius/ebms/cpa/service/CpaServiceUpdateCacheEvictTest.java (NEW)",
+    "/app/ebms-adapter/cpa-service/pom.xml (activated inherited maven-compiler-plugin config so Lombok processor path is honored on clean builds)"
+  ],
+  "success_rate": {"backend": "100% (79/79 cpa-service tests pass, including 2 new SpEL cache-evict tests)", "frontend": "not tested (backend-only per review request)"},
+  "test_credentials": "N/A",
+  "seed_data_creation": "None. Tests use in-memory ConcurrentMapCacheManager and Mockito-mocked repositories.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Env has openjdk-17 + Apache Maven 3.8.7. Project's pom.xml specifies <java.version>17</java.version> (the review request's mention of Java 21 was incorrect — actual requirement is Java 17, so JDK 17 in the sandbox is fine). Docker/postgres/rabbitmq NOT available, so full docker-compose integration test still not runnable in-pod (same as iteration_22). Slice tests with Spring context + Mockito mocks + in-memory cache manager are the right approach for cache/AOP-related fixes. Build order: `mvn -pl ebms-common install -DskipTests` first, then `mvn -pl cpa-service test`. If you touch @Cacheable/@CacheEvict SpEL, use CpaServiceUpdateCacheEvictTest as the template — pure Mockito unit tests will silently miss the bug.",
+  "rca of the issue": "ROOT CAUSE: @CacheEvict(value='cpa-by-id', key='#cpaIdFromXml') on CpaService.update(String cpaIdFromPath, CpaDto dto) referenced 'cpaIdFromXml' which is a LOCAL variable computed inside the method body (line 190: String cpaIdFromXml = partyXmlParser.parseCpaId(dto.getCpaXml())). Spring's SpEL cache-key evaluator only exposes method PARAMETERS (and #result post-invocation), NOT local variables. When Spring evaluated '#cpaIdFromXml' it returned null, and CacheAspectSupport.generateKey threw IllegalArgumentException('Null key returned for cache operation ...'). Because @CacheEvict defaults to beforeInvocation=false, this crash happened AFTER the DB save had already committed — hence the user saw the success log line 'CPA overschreven...' followed immediately by a 500 response. REPRODUCTION: revert key to '#cpaIdFromXml' and run CpaServiceUpdateCacheEvictTest — reproduces the exact stack trace 'IllegalArgumentException: Null key returned for cache operation ... key=#cpaIdFromXml'. MITIGATION: change key to '#result.cpaId' (uses the returned CpaDto's cpaId field, resolvable post-invocation because beforeInvocation=false is the default). Verified: fix compiles, all 79 cpa-service tests pass, cache entry for the given cpaId is actually evicted after update() completes."
+}

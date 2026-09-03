@@ -184,7 +184,7 @@ public class CpaService {
      * {@link #addCertificate} toegevoegde certificaten die niet (meer) in de XML voorkomen
      * worden bij de volgende create/update verwijderd.
      */
-    @CacheEvict(value = "cpa-by-id", key = "#cpaIdFromXml")
+    @CacheEvict(value = "cpa-by-id", key = "#result.cpaId")
     @Transactional
     public CpaDto update(String cpaIdFromPath, CpaDto dto) {
         String cpaIdFromXml = partyXmlParser.parseCpaId(dto.getCpaXml());
