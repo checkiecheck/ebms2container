@@ -1,0 +1,40 @@
+{
+  "summary": "Backend + frontend verification of iteration_24 (NEW FEATURE, additive): CPA delivery-channel auto-sync from cpaXml + admin UI 'Afleverkanalen' table. Wrote two new Maven test classes (CpaPartyXmlParserDeliveryChannelTest = 16 tests, CpaServiceDeliveryChannelSyncTest = 6 tests) covering all four requested test cases (A: RM+sign+encrypt->osb-rm-e with PT5M/P1D and plain-seconds duration; B: no DocExchange->osb-be fallback; C: 2 parties w/ same channelId/transportId/docExchangeId scoped per-PartyInfo; D: tp: namespace prefix on both elements AND attributes) plus the full dkProfile heuristic matrix, edge cases (null/malformed/missing IDREF/invalid duration) and the XML-wins reconciliation rule for both create() and update() including manually-added-channel deletion. Full cpa-service module now runs 101/101 tests (79 existing + 22 new), BUILD SUCCESS. Frontend: served static admin/index.html via python http.server + Playwright route-mock, verified empty-state text, GET .../channels wiring on cpa-fetch-button, correct rendering of all 8 columns with data-testid=cpa-channel-row-{idx}, null-safe placeholders ('-') for missing retry/interval/persist fields, and reset-to-empty on cpa-delete-button->delete-confirm-button flow.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/ebms-adapter/cpa-service/src/test/java/nl/logius/ebms/cpa/util/CpaPartyXmlParserDeliveryChannelTest.java",
+    "/app/ebms-adapter/cpa-service/src/test/java/nl/logius/ebms/cpa/service/CpaServiceDeliveryChannelSyncTest.java",
+    "/app/test_reports/pytest/TEST-nl.logius.ebms.cpa.util.CpaPartyXmlParserDeliveryChannelTest.xml",
+    "/app/test_reports/pytest/TEST-nl.logius.ebms.cpa.service.CpaServiceDeliveryChannelSyncTest.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "CpaPartyXmlParser.indexById() uses parent.getElementsByTagNameNS('*', localName) which is a RECURSIVE (descendant) lookup, not direct-children-only. That means if a nested foreign element (highly unlikely in ebXML CPPA 2.0 but possible in extensions) contains a child named Transport/DocExchange with a matching id attribute, it would be picked up. In practice CPPA 2.0 keeps Transport/DocExchange as direct siblings of PartyInfo children so this is a non-issue; noting for completeness.",
+    "guessDkProfile() correctly encodes the requested matrix: enc dominates -> -e suffix (regardless of sign), then sign -> -s, then RM alone -> osb-rm, none -> osb-be. Matches the specified osb-be / osb-rm / osb-be-s / osb-rm-s / osb-be-e / osb-rm-e set.",
+    "parseDurationSecondsSafe() accepts both plain integer seconds AND ISO-8601 (Duration.parse). Note: java.time.Duration.parse only supports the time-based ISO forms (PT..., P..D..H..M..S with T). Plain 'P1D' works (converts to 86400s). If real CPA XML ever uses year/month ISO periods like 'P1Y', Duration.parse throws and the field remains null - acceptable given the CPPA spec expects seconds-scale durations.",
+    "syncDeliveryChannels() mirrors syncCertificates() exactly (add/update-in-place-by-natural-key/delete-missing) - consistent with the codebase's XML-is-single-source-of-truth pattern and reuses the same repository.deleteAll/saveAll idiom.",
+    "The service ordering is correct: cpaRepository.save(entity) is called BEFORE syncDeliveryChannels() (line 168 vs 170 in create, 232 vs 234 in update), so the parent CPA row always exists before the child channel rows reference it (respects FK if any is declared).",
+    "The @CacheEvict(key='#result.cpaId') from iteration_23 is untouched; new syncDeliveryChannels() runs inside the same @Transactional method scope as syncCertificates() so both are committed atomically.",
+    "Frontend renderChannels() uses ?? (nullish coalescing) for retryCount/retryInterval/persistDuration so 0 would still render as '0' correctly (not as '-'), while null/undefined renders '-'. Good null-safety.",
+    "Minor UX suggestion (non-blocking): the dkProfile badge is always emerald (success color) regardless of profile. Since 'osb-be' (no security) is functionally weaker than 'osb-rm-e', consider color-coding by profile strength in a future iteration."
+  ],
+  "updated_files": [
+    "/app/ebms-adapter/cpa-service/src/test/java/nl/logius/ebms/cpa/util/CpaPartyXmlParserDeliveryChannelTest.java (NEW - 16 tests)",
+    "/app/ebms-adapter/cpa-service/src/test/java/nl/logius/ebms/cpa/service/CpaServiceDeliveryChannelSyncTest.java (NEW - 6 tests)"
+  ],
+  "success_rate": {"backend": "100% (101/101 cpa-service tests, 22 new)", "frontend": "100% (empty-state, fetch-render, delete-reset all verified via Playwright + route-mock)"},
+  "test_credentials": "N/A",
+  "seed_data_creation": "None (Mockito + inline XML strings + fetch route-mock).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Env: openjdk-17.0.20.1 + Maven 3.8.7 (Java 21 in review request was incorrect - pom.xml pins java.version=17, iteration_23 already flagged this). Build order stays: `mvn -pl ebms-common install -DskipTests` then `mvn -pl cpa-service test`. Docker/postgres/rabbitmq still NOT available in-pod, so end-to-end via ebms-orchestrator boot is not runnable - use Mockito slice tests + static admin/index.html + Playwright fetch route-mock (python3 -m http.server on the static folder works fine). New delivery-channel feature is additive and doesn't touch existing sync logic (parties/certificates) or the @CacheEvict fix. If retesting: the 22 new tests are self-contained (no shared fixtures with existing tests) and can be run in isolation via `mvn -pl cpa-service test -Dtest=CpaPartyXmlParserDeliveryChannelTest,CpaServiceDeliveryChannelSyncTest`.",
+  "rca of the issue": "N/A - this iteration is a NEW FEATURE, not a bugfix. All specified acceptance criteria (test cases A/B/C/D, dkProfile heuristic, XML-wins on channels, per-party ID isolation, namespace-prefix agnostic parsing, frontend table wiring on upload/fetch/delete) are implemented correctly and verified passing."
+}

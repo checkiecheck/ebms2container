@@ -167,6 +167,7 @@ public class CpaService {
 
         CpaEntity saved = cpaRepository.save(entity);
         syncCertificates(cpaId, dto.getCpaXml());
+        syncDeliveryChannels(cpaId, dto.getCpaXml());
         log.info("CPA aangemaakt: {} ({} partij(en) geëxtraheerd uit XML)",
             saved.getCpaId(), parsedParties.size());
         return enrichWithDetails(cpaMapper.toDto(saved), saved);
@@ -230,6 +231,7 @@ public class CpaService {
 
         CpaEntity saved = cpaRepository.save(entity);
         syncCertificates(cpaIdFromXml, dto.getCpaXml());
+        syncDeliveryChannels(cpaIdFromXml, dto.getCpaXml());
         log.info("CPA overschreven: {} ({} partij(en) gesynchroniseerd uit XML)",
             cpaIdFromXml, parsedParties.size());
         return enrichWithDetails(cpaMapper.toDto(saved), saved);
@@ -369,6 +371,53 @@ public class CpaService {
 
     private String certKey(PartnerCertificateEntity cert) {
         return cert.getPartyId() + "::" + cert.getCertificateAlias();
+    }
+
+    /**
+     * Synchroniseert de {@code cpa_delivery_channel}-rijen van een CPA met de afleverkanalen die
+     * gedefinieerd zijn in de bijbehorende {@code cpaXml} ({@code <DeliveryChannel>} +
+     * gekoppelde {@code <Transport>}/{@code <DocExchange>}). De XML is single source of truth:
+     * kanalen die niet (meer) in de XML voorkomen worden verwijderd (ook als ze handmatig via
+     * {@link #addDeliveryChannel} zijn toegevoegd), bestaande worden bijgewerkt en nieuwe worden
+     * toegevoegd. Natuurlijke sleutel: {@code (partyId, channelId)}.
+     */
+    private void syncDeliveryChannels(String cpaId, String cpaXml) {
+        List<CpaDeliveryChannelEntity> parsed = partyXmlParser.parseDeliveryChannels(cpaXml, cpaId);
+        List<CpaDeliveryChannelEntity> existing = channelRepository.findByCpaId(cpaId);
+
+        Map<String, CpaDeliveryChannelEntity> existingByKey = existing.stream()
+            .collect(Collectors.toMap(this::channelKey, e -> e, (a, b) -> a));
+        Set<String> parsedKeys = parsed.stream().map(this::channelKey).collect(Collectors.toSet());
+
+        List<CpaDeliveryChannelEntity> toDelete = existing.stream()
+            .filter(e -> !parsedKeys.contains(channelKey(e)))
+            .toList();
+        if (!toDelete.isEmpty()) {
+            channelRepository.deleteAll(toDelete);
+        }
+
+        List<CpaDeliveryChannelEntity> toSave = new ArrayList<>();
+        for (CpaDeliveryChannelEntity p : parsed) {
+            CpaDeliveryChannelEntity existingChannel = existingByKey.get(channelKey(p));
+            if (existingChannel != null) {
+                existingChannel.setDkProfile(p.getDkProfile());
+                existingChannel.setTransportProtocol(p.getTransportProtocol());
+                existingChannel.setEndpointUrl(p.getEndpointUrl());
+                existingChannel.setRetryCount(p.getRetryCount());
+                existingChannel.setRetryInterval(p.getRetryInterval());
+                existingChannel.setPersistDuration(p.getPersistDuration());
+                toSave.add(existingChannel);
+            } else {
+                toSave.add(p);
+            }
+        }
+        if (!toSave.isEmpty()) {
+            channelRepository.saveAll(toSave);
+        }
+    }
+
+    private String channelKey(CpaDeliveryChannelEntity e) {
+        return e.getPartyId() + "::" + e.getChannelId();
     }
 
     private CpaDto enrichWithDetails(CpaDto dto, CpaEntity entity) {

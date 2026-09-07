@@ -11,7 +11,10 @@ import org.w3c.dom.NamedNodeMap;
 import org.xml.sax.InputSource;
 import nl.logius.ebms.common.model.cpa.PartyInfoDto;
 import nl.logius.ebms.common.util.OinValidator;
+import nl.logius.ebms.cpa.entity.CpaDeliveryChannelEntity;
 import nl.logius.ebms.cpa.entity.PartnerCertificateEntity;
+import java.util.HashMap;
+import java.util.Map;
 import org.springframework.stereotype.Component;
 import org.w3c.dom.NodeList;
 
@@ -298,6 +301,179 @@ private static String getLenientAttribute(Element element, String attributeName)
             return "ENCRYPTION";
         }
         return null;
+    }
+
+    // ── Afleverkanaal-extractie ──────────────────────────────────────────
+
+    /**
+     * Extraheert alle {@code <DeliveryChannel>}-elementen per partij uit de CPA XML, met de
+     * gekoppelde {@code <Transport>} (endpoint-URL) en {@code <DocExchange>} (Reliable
+     * Messaging-parameters + sign/encrypt-detectie voor het Digikoppeling-profiel) op basis van
+     * de {@code channelId}/{@code transportId}/{@code docExchangeId} ID-referenties binnen
+     * dezelfde {@code <PartyInfo>}. Retourneert transiente (niet-opgeslagen)
+     * {@link CpaDeliveryChannelEntity}'s. Fail-safe: bij een parsefout wordt een lege lijst
+     * teruggegeven (de CPA blijft geldig, alleen kanaal-synchronisatie wordt overgeslagen).
+     *
+     * <p><b>Let op:</b> {@code dkProfile} staat niet als los attribuut in de generieke ebXML
+     * CPPA-schema en wordt daarom afgeleid (heuristiek): aanwezigheid van
+     * {@code <ReliableMessaging>} bepaalt "rm" vs "be", aanwezigheid van
+     * {@code Sender/ReceiverNonRepudiation} bepaalt de "-s"-suffix en aanwezigheid van
+     * {@code Sender/ReceiverDigitalEnvelope} de "-e"-suffix. Zonder treffers: {@code osb-be}.
+     *
+     * @param cpaXml het volledige CPA-document als string
+     * @param cpaId  de CPA-identifier (niet op kanaalniveau aanwezig in de XML zelf)
+     * @return lijst van geëxtraheerde afleverkanalen (mogelijk leeg)
+     */
+    public List<CpaDeliveryChannelEntity> parseDeliveryChannels(String cpaXml, String cpaId) {
+        if (cpaXml == null || cpaXml.isBlank()) {
+            return List.of();
+        }
+        try {
+            Document doc = parseDocument(cpaXml);
+            NodeList partyInfoNodes = doc.getElementsByTagNameNS("*", "PartyInfo");
+
+            List<CpaDeliveryChannelEntity> channels = new ArrayList<>();
+            for (int i = 0; i < partyInfoNodes.getLength(); i++) {
+                Element partyInfoEl = (Element) partyInfoNodes.item(i);
+                Element partyIdEl = firstDescendant(partyInfoEl, "PartyId");
+                if (partyIdEl == null || partyIdEl.getTextContent().isBlank()) {
+                    continue;
+                }
+                String partyId = partyIdEl.getTextContent().trim();
+
+                Map<String, Element> transportsById = indexById(partyInfoEl, "Transport", "transportId");
+                Map<String, Element> docExchangesById = indexById(partyInfoEl, "DocExchange", "docExchangeId");
+
+                NodeList channelNodes = partyInfoEl.getElementsByTagNameNS("*", "DeliveryChannel");
+                for (int j = 0; j < channelNodes.getLength(); j++) {
+                    CpaDeliveryChannelEntity channel = parseDeliveryChannel(
+                        (Element) channelNodes.item(j), cpaId, partyId, transportsById, docExchangesById);
+                    if (channel != null) {
+                        channels.add(channel);
+                    }
+                }
+            }
+            return channels;
+        } catch (Exception e) {
+            log.warn("Kon afleverkanalen niet uit CPA XML parsen (CPA blijft geldig, kanalen "
+                + "worden niet gesynchroniseerd): {}", e.getMessage());
+            return List.of();
+        }
+    }
+
+    /** Indexeert directe elementen met de gegeven lokale naam op hun ID-attribuut (bv. transportId). */
+    private Map<String, Element> indexById(Element parent, String localName, String idAttribute) {
+        Map<String, Element> byId = new HashMap<>();
+        NodeList nodes = parent.getElementsByTagNameNS("*", localName);
+        for (int i = 0; i < nodes.getLength(); i++) {
+            Element el = (Element) nodes.item(i);
+            String id = getLenientAttribute(el, idAttribute);
+            if (id != null && !id.isBlank()) {
+                byId.put(id, el);
+            }
+        }
+        return byId;
+    }
+
+    private CpaDeliveryChannelEntity parseDeliveryChannel(Element channelEl, String cpaId, String partyId,
+            Map<String, Element> transportsById, Map<String, Element> docExchangesById) {
+        String channelId = getLenientAttribute(channelEl, "channelId");
+        if (channelId == null || channelId.isBlank()) {
+            return null;
+        }
+
+        String endpointUrl = null;
+        String transportId = getLenientAttribute(channelEl, "transportId");
+        Element transportEl = transportId != null ? transportsById.get(transportId) : null;
+        if (transportEl != null) {
+            Element endpointEl = firstDescendant(transportEl, "Endpoint");
+            if (endpointEl != null) {
+                endpointUrl = blankToNull(getLenientAttribute(endpointEl, "uri"));
+            }
+        }
+
+        Integer retryCount = null;
+        Integer retryInterval = null;
+        Integer persistDuration = null;
+        boolean reliableMessaging = false;
+        boolean signed = false;
+        boolean encrypted = false;
+
+        String docExchangeId = getLenientAttribute(channelEl, "docExchangeId");
+        Element docExchangeEl = docExchangeId != null ? docExchangesById.get(docExchangeId) : null;
+        if (docExchangeEl != null) {
+            NodeList rmNodes = docExchangeEl.getElementsByTagNameNS("*", "ReliableMessaging");
+            if (rmNodes.getLength() > 0) {
+                reliableMessaging = true;
+                Element rmEl = (Element) rmNodes.item(0);
+                retryCount = parseIntSafe(textOf(firstDescendant(rmEl, "Retries")));
+                retryInterval = parseDurationSecondsSafe(textOf(firstDescendant(rmEl, "RetryInterval")));
+            }
+            signed = docExchangeEl.getElementsByTagNameNS("*", "SenderNonRepudiation").getLength() > 0
+                || docExchangeEl.getElementsByTagNameNS("*", "ReceiverNonRepudiation").getLength() > 0;
+            encrypted = docExchangeEl.getElementsByTagNameNS("*", "SenderDigitalEnvelope").getLength() > 0
+                || docExchangeEl.getElementsByTagNameNS("*", "ReceiverDigitalEnvelope").getLength() > 0;
+            Element persistEl = firstDescendant(docExchangeEl, "PersistDuration");
+            if (persistEl != null) {
+                persistDuration = parseDurationSecondsSafe(persistEl.getTextContent());
+            }
+        }
+
+        return CpaDeliveryChannelEntity.builder()
+            .cpaId(cpaId)
+            .partyId(partyId)
+            .channelId(channelId)
+            .dkProfile(guessDkProfile(reliableMessaging, signed, encrypted))
+            .transportProtocol("HTTP")
+            .endpointUrl(endpointUrl)
+            .retryCount(retryCount)
+            .retryInterval(retryInterval)
+            .persistDuration(persistDuration)
+            .build();
+    }
+
+    /** Digikoppeling-profielcode conform de RM/Sign/Encrypt-tabel; osb-be als niets is gedetecteerd. */
+    private String guessDkProfile(boolean reliableMessaging, boolean signed, boolean encrypted) {
+        if (encrypted) {
+            return reliableMessaging ? "osb-rm-e" : "osb-be-e";
+        }
+        if (signed) {
+            return reliableMessaging ? "osb-rm-s" : "osb-be-s";
+        }
+        return reliableMessaging ? "osb-rm" : "osb-be";
+    }
+
+    private Integer parseIntSafe(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return Integer.parseInt(value.trim());
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /** Parseert seconden als plein getal, of anders een ISO-8601 duur (bv. PT5M) naar seconden. */
+    private Integer parseDurationSecondsSafe(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        String trimmed = value.trim();
+        try {
+            return Integer.parseInt(trimmed);
+        } catch (NumberFormatException ignored) {
+            // Geen plein getal - probeer ISO-8601 duur-notatie.
+        }
+        try {
+            return (int) java.time.Duration.parse(trimmed).getSeconds();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private String textOf(Element element) {
+        return element != null ? element.getTextContent().trim() : null;
     }
 
     /** Formatteert ruwe base64 DER-data (zoals in ds:X509Certificate) naar PEM. */

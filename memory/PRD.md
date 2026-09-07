@@ -611,6 +611,26 @@ INBOUND bericht dat vastzat op PROCESSING liep elke ~10 minuten in een eindeloze
 - Vóór elke feature/wijziging eerst impact (bestanden/componenten/aannames/risico) uitleggen via
   `ask_human` en op akkoord wachten voordat iets wordt geïmplementeerd.
 
+### Feature: CPA delivery-channel auto-sync uit XML + UI-inzicht (voltooid – september 2026)
+- [x] `CpaPartyXmlParser.parseDeliveryChannels()`: leest per partij `<DeliveryChannel channelId>`
+  + gekoppelde `<Transport>` (endpoint-URL) en `<DocExchange>` (Reliable Messaging retries/
+  interval/persistDuration, plus sign/encrypt-detectie via NonRepudiation/DigitalEnvelope).
+  `dkProfile` afgeleid via `guessDkProfile()`: enc → `-e`, sign (zonder enc) → `-s`, RM zonder
+  sign/enc → `osb-rm`, niets gevonden → `osb-be` (fallback).
+- [x] `CpaService.syncDeliveryChannels()` aangeroepen vanuit `create()` en `update()`, zelfde
+  XML-is-single-source-of-truth-patroon als partijen/certificaten (natuurlijke sleutel
+  `partyId::channelId`).
+- [x] Nieuwe "Afleverkanalen"-kaart in de admin UI (`cpa-channels-table`), gevuld via
+  `GET /api/cpa/{cpaId}/channels` na upload/overschrijven/ophalen, reset bij verwijderen.
+- **Testing_agent verificatie (geslaagd):** 22 nieuwe tests (16 parser + 6 service), 101/101
+  cpa-service tests groen. Dekt: RM+sign+encrypt-matrix, ISO-8601 én plein-seconden duur-parsing,
+  fallback zonder DocExchange, 2-partijen-isolatie (geen ID-lekkage tussen partijen), tp:-
+  namespace-prefix op elementen én attributen, en de "handmatig toegevoegd kanaal verdwijnt bij
+  volgende sync"-regel. Frontend: lege-staat, fetch-na-upload/fetch-na-ophalen, reset-na-delete.
+- **Bekende beperking (heuristiek, niet garantie):** `dkProfile` is niet letterlijk in generieke
+  ebXML CPPA aanwezig; als een echte CPA een jaar/maand-ISO-duur (`P1Y`) gebruikt i.p.v.
+  seconden-schaal, blijft dat veld `null` (buiten scope, CPPA verwacht seconden-schaal).
+
 ### P0 – Fase 4: auditor-service (GEPARKEERD IN BACKLOG)
 - **Discussie (augustus 2026):** gebruiker wil niet noodzakelijk een eigen microservice bouwen
   om `ebms.audit.events` (queue bestaat al, zie `RabbitMqConfig.QUEUE_AUDIT`, gepubliceerd door
