@@ -592,6 +592,25 @@ INBOUND bericht dat vastzat op PROCESSING liep elke ~10 minuten in een eindeloze
 - **Werkafspraak (vanaf september 2026):** vóór elke wijziging eerst impact (bestanden/
   componenten/risico) uitleggen en op akkoord wachten voordat de wijziging wordt uitgevoerd.
 
+### P1 – CPA delivery-channel auto-sync uit XML + UI-inzicht (GEPARKEERD IN BACKLOG)
+- **Akkoord (september 2026):** gebruiker wil `cpa_delivery_channel` automatisch vullen uit
+  `cpaXml` (zelfde patroon als `cpa_party`/`partner_certificate`) + een "Afleverkanalen"-sectie
+  in de admin UI. Impact-analyse en aanpak goedgekeurd (nieuwe `parseDeliveryChannels()` in
+  `CpaPartyXmlParser`, nieuwe `syncDeliveryChannels()` in `CpaService` aangeroepen vanuit
+  `create()`/`update()`, `dk_profile` afgeleid via heuristiek op RM/NonRepudiation/
+  DigitalEnvelope-elementen met fallback `osb-be`). **Status: geparkeerd, nog niet gebouwd.**
+- **Referentie-vergelijking uitgevoerd (t.o.v. `eluinstra/ebms-core` API-doc):** zie
+  `CHANGELOG`-sectie september 2026 voor volledige dekking-analyse. Belangrijkste gevonden gaps:
+  `UrlMappingService`-equivalent (CPA endpoint-override zonder CPA te wijzigen, relevant voor
+  Logius-certificeringsomgeving) en `CertificateMappingService`-equivalent (generieke
+  certificaat-override los van CPA) ontbreken volledig. `sendMessage`/`getUnprocessedMessageIds`/
+  events-polling zijn bewust anders opgelost (event-driven RabbitMQ i.p.v. RPC/poll) — geen gap,
+  architectuurkeuze.
+
+### Werkafspraak (vanaf september 2026)
+- Vóór elke feature/wijziging eerst impact (bestanden/componenten/aannames/risico) uitleggen via
+  `ask_human` en op akkoord wachten voordat iets wordt geïmplementeerd.
+
 ### P0 – Fase 4: auditor-service (GEPARKEERD IN BACKLOG)
 - **Discussie (augustus 2026):** gebruiker wil niet noodzakelijk een eigen microservice bouwen
   om `ebms.audit.events` (queue bestaat al, zie `RabbitMqConfig.QUEUE_AUDIT`, gepubliceerd door
