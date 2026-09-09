@@ -129,6 +129,18 @@ public class EbmsMessageEntity {
     @Column(name = "error_message", columnDefinition = "TEXT")
     private String errorMessage;
 
+    /**
+     * Aantal keer dat dit messageId als duplicaat is aangeboden. De originele rij wordt bij een
+     * duplicaat NIET overschreven (status/content blijven ongewijzigd) - dit veld maakt duplicaat-
+     * pogingen alsnog zichtbaar in de admin-UI zonder de {@code uq_message_id}-constraint te raken.
+     */
+    @Column(name = "duplicate_count", nullable = false)
+    @Builder.Default
+    private int duplicateCount = 0;
+
+    @Column(name = "last_duplicate_at")
+    private Instant lastDuplicateAt;
+
     // ── Audit ─────────────────────────────────────────────────────────────
 
     @CreationTimestamp

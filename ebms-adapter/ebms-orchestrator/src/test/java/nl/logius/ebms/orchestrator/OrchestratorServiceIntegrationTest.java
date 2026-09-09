@@ -93,7 +93,7 @@ class OrchestratorServiceIntegrationTest {
 
         orchestratorService.retryFailedMessages();
 
-        EbmsMessageEntity updated = messageRepository.findByMessageId("msg-retry-001").orElseThrow();
+        EbmsMessageEntity updated = messageRepository.findByMessageIdAndDirection("msg-retry-001", MessageDirection.OUTBOUND).orElseThrow();
         assertThat(updated.getStatus()).isEqualTo(MessageStatus.PROCESSING);
         assertThat(updated.getRetryCount()).isEqualTo((short) 2);
     }
@@ -109,7 +109,7 @@ class OrchestratorServiceIntegrationTest {
 
         orchestratorService.retryFailedMessages();
 
-        EbmsMessageEntity unchanged = messageRepository.findByMessageId("msg-maxretry-001").orElseThrow();
+        EbmsMessageEntity unchanged = messageRepository.findByMessageIdAndDirection("msg-maxretry-001", MessageDirection.OUTBOUND).orElseThrow();
         assertThat(unchanged.getStatus()).isEqualTo(MessageStatus.FAILED);
         assertThat(unchanged.getRetryCount()).isEqualTo((short) 3);
     }
@@ -126,7 +126,7 @@ class OrchestratorServiceIntegrationTest {
 
         orchestratorService.retryFailedMessages();
 
-        EbmsMessageEntity unchanged = messageRepository.findByMessageId("msg-inbound-failed-001").orElseThrow();
+        EbmsMessageEntity unchanged = messageRepository.findByMessageIdAndDirection("msg-inbound-failed-001", MessageDirection.INBOUND).orElseThrow();
         assertThat(unchanged.getStatus()).isEqualTo(MessageStatus.FAILED);
         assertThat(unchanged.getRetryCount()).isEqualTo((short) 0);
     }
@@ -142,7 +142,7 @@ class OrchestratorServiceIntegrationTest {
 
         orchestratorService.expireMessages();
 
-        EbmsMessageEntity updated = messageRepository.findByMessageId("msg-expired-001").orElseThrow();
+        EbmsMessageEntity updated = messageRepository.findByMessageIdAndDirection("msg-expired-001", MessageDirection.INBOUND).orElseThrow();
         assertThat(updated.getStatus()).isEqualTo(MessageStatus.FAILED);
     }
 
@@ -155,7 +155,7 @@ class OrchestratorServiceIntegrationTest {
 
         orchestratorService.expireMessages();
 
-        EbmsMessageEntity unchanged = messageRepository.findByMessageId("msg-notexpired-001").orElseThrow();
+        EbmsMessageEntity unchanged = messageRepository.findByMessageIdAndDirection("msg-notexpired-001", MessageDirection.INBOUND).orElseThrow();
         assertThat(unchanged.getStatus()).isEqualTo(MessageStatus.PROCESSING);
     }
 

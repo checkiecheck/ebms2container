@@ -9,11 +9,13 @@ import nl.logius.ebms.orchestrator.entity.EbmsMessageEntity;
 import nl.logius.ebms.orchestrator.entity.MessageDirection;
 import nl.logius.ebms.orchestrator.entity.MessageStatus;
 import nl.logius.ebms.orchestrator.repository.EbmsMessageRepository;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.Optional;
 
 /**
  * Houdt de {@code ebms_message}-status van een uitgaand bericht bij, onafhankelijk van of de
@@ -53,45 +55,52 @@ public class OutboundMessageTrackingService {
         Instant ttl = channel != null && channel.getPersistDuration() != null
             ? Instant.now().plusSeconds(channel.getPersistDuration()) : null;
 
-        return messageRepository.findByMessageId(messageId)
-            .map(existing -> {
-                existing.setRawSoapXml(rawSoapXml);
-                existing.setPayloadRef(message.getPayloadRef());
-                existing.setPayloadContentType(message.getPayloadContentType());
-                existing.setTimeToLive(ttl);
-                existing.setStatus(MessageStatus.PROCESSING);
-                log.debug("[OUTBOUND] Idempotente herverwerking: messageId={}", messageId);
-                return messageRepository.save(existing);
-            })
-            .orElseGet(() -> {
-                EbmsMessageEntity entity = EbmsMessageEntity.builder()
-                    .messageId(messageId)
-                    .conversationId(header.getConversationId())
-                    .cpaId(header.getCpaId())
-                    .fromPartyId(fromPartyId)
-                    .toPartyId(toPartyId)
-                    .fromRole(header.getFromRole())
-                    .toRole(header.getToRole())
-                    .service(header.getService() != null ? header.getService().getValue() : "UNKNOWN")
-                    .serviceType(header.getService() != null ? header.getService().getType() : null)
-                    .action(header.getAction())
-                    .direction(MessageDirection.OUTBOUND)
-                    .status(MessageStatus.PROCESSING)
-                    .timestamp(Instant.now())
-                    .timeToLive(ttl)
-                    .payloadRef(message.getPayloadRef())
-                    .payloadContentType(message.getPayloadContentType())
-                    .rawSoapXml(rawSoapXml)
-                    .build();
+        Optional<EbmsMessageEntity> existing = findExistingOutbound(messageId);
+        if (existing.isPresent()) {
+            EbmsMessageEntity entity = existing.get();
+            entity.setRawSoapXml(rawSoapXml);
+            entity.setPayloadRef(message.getPayloadRef());
+            entity.setPayloadContentType(message.getPayloadContentType());
+            entity.setTimeToLive(ttl);
+            entity.setStatus(MessageStatus.PROCESSING);
+            log.debug("[OUTBOUND] Idempotente herverwerking: messageId={}", messageId);
+            return messageRepository.save(entity);
+        }
 
-                return messageRepository.save(entity);
-            });
+        EbmsMessageEntity entity = EbmsMessageEntity.builder()
+            .messageId(messageId)
+            .conversationId(header.getConversationId())
+            .cpaId(header.getCpaId())
+            .fromPartyId(fromPartyId)
+            .toPartyId(toPartyId)
+            .fromRole(header.getFromRole())
+            .toRole(header.getToRole())
+            .service(header.getService() != null ? header.getService().getValue() : "UNKNOWN")
+            .serviceType(header.getService() != null ? header.getService().getType() : null)
+            .action(header.getAction())
+            .direction(MessageDirection.OUTBOUND)
+            .status(MessageStatus.PROCESSING)
+            .timestamp(Instant.now())
+            .timeToLive(ttl)
+            .payloadRef(message.getPayloadRef())
+            .payloadContentType(message.getPayloadContentType())
+            .rawSoapXml(rawSoapXml)
+            .build();
+
+        try {
+            return messageRepository.save(entity);
+        } catch (DataIntegrityViolationException e) {
+            log.error("[OUTBOUND] Kon PROCESSING-bericht NIET persisteren: messageId={} bestaat al als bericht "
+                + "met een andere richting (unique constraint op message_id) - dit duidt op een messageId-"
+                + "botsing tussen INBOUND en OUTBOUND.", messageId);
+            return entity;
+        }
     }
 
     /** Zet de rij op SENT (rm-profielen, wacht op ACK) of DELIVERED (be-profielen). */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void markSentOrDelivered(String messageId, boolean requireAck) {
-        messageRepository.findByMessageId(messageId).ifPresentOrElse(entity -> {
+        findExistingOutbound(messageId).ifPresentOrElse(entity -> {
             if (requireAck) {
                 entity.setStatus(MessageStatus.SENT);
                 entity.setAckRequested(true);
@@ -108,10 +117,14 @@ public class OutboundMessageTrackingService {
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void markFailed(String messageId, String errorMessage) {
-        messageRepository.findByMessageId(messageId).ifPresentOrElse(entity -> {
+        findExistingOutbound(messageId).ifPresentOrElse(entity -> {
             entity.setStatus(MessageStatus.FAILED);
             entity.setErrorMessage(errorMessage);
             messageRepository.save(entity);
         }, () -> log.warn("[OUTBOUND] Kon status niet op FAILED zetten: geen ebms_message-rij voor messageId={}", messageId));
+    }
+
+    private Optional<EbmsMessageEntity> findExistingOutbound(String messageId) {
+        return messageRepository.findByMessageIdAndDirection(messageId, MessageDirection.OUTBOUND);
     }
 }

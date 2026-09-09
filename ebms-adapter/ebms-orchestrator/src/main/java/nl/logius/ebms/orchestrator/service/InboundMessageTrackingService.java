@@ -7,9 +7,13 @@ import nl.logius.ebms.orchestrator.entity.EbmsMessageEntity;
 import nl.logius.ebms.orchestrator.entity.MessageDirection;
 import nl.logius.ebms.orchestrator.entity.MessageStatus;
 import nl.logius.ebms.orchestrator.repository.EbmsMessageRepository;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Instant;
+import java.util.Optional;
 
 /**
  * Houdt de {@code ebms_message}-status van een inkomend bericht bij, onafhankelijk van of de
@@ -35,7 +39,7 @@ public class InboundMessageTrackingService {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public EbmsMessageEntity persistReceived(EbxmlMessageHeader header, String processedSoap, String clientOin) {
         String messageId = header.getMessageInfo().getMessageId();
-        return messageRepository.findByMessageId(messageId)
+        return findExistingInbound(messageId)
             .map(existing -> {
                 existing.setRawSoapXml(processedSoap);
                 existing.setStatus(MessageStatus.RECEIVED);
@@ -44,19 +48,41 @@ public class InboundMessageTrackingService {
             .orElseGet(() -> messageRepository.save(buildEntity(header, processedSoap, clientOin)));
     }
 
-    /** Zet de rij op PROCESSING nadat deze succesvol op de inbound-queue is gepubliceerd. */
+    /** Zet de rij op DELIVERED nadat deze succesvol op de inbound-queue is gepubliceerd. */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void markProcessing(String messageId) {
-        messageRepository.findByMessageId(messageId).ifPresentOrElse(entity -> {
-            entity.setStatus(MessageStatus.PROCESSING);
+    public void markDelivered(String messageId) {
+        findExistingInbound(messageId).ifPresentOrElse(entity -> {
+            entity.setStatus(MessageStatus.DELIVERED);
             messageRepository.save(entity);
-        }, () -> log.warn("[INBOUND] Kon status niet bijwerken naar PROCESSING: geen rij voor messageId={}", messageId));
+        }, () -> log.warn("[INBOUND] Kon status niet bijwerken naar DELIVERED: geen rij voor messageId={}", messageId));
+    }
+
+    /**
+     * Registreert een gedetecteerd duplicaat op het bestaande bericht, zonder de originele rij te
+     * overschrijven (status/content blijven ongewijzigd - zie {@link MessageStatus#DUPLICATE}
+     * javadoc en {@code uq_message_id}-constraint).
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void recordDuplicate(String messageId) {
+        findExistingInbound(messageId).ifPresentOrElse(entity -> {
+            entity.setDuplicateCount(entity.getDuplicateCount() + 1);
+            entity.setLastDuplicateAt(Instant.now());
+            messageRepository.save(entity);
+            log.info("[INBOUND] Duplicaat geregistreerd (totaal {}x): messageId={}",
+                entity.getDuplicateCount(), messageId);
+        }, () -> log.warn("[INBOUND] Duplicaat gedetecteerd maar geen bestaande INBOUND-rij gevonden: messageId={}", messageId));
     }
 
     /**
      * Persisteert een afgewezen/mislukt inbound-bericht als FAILED met foutdetail. Idempotente
      * upsert; draait altijd in een eigen, direct-committende transactie zodat dit overeind blijft
      * ook al rolt de aanroepende flow (die hierna een exception doorgooit) verder niets terug.
+     *
+     * <p>{@code message_id} is globaal uniek in de database (niet per richting). Als hetzelfde
+     * messageId al bestaat als OUTBOUND-rij (bv. een loopback-testscenario) kan hier geen nieuwe
+     * INBOUND-rij ingevoegd worden - dat geven we dan als duidelijke ERROR-log door i.p.v. de
+     * OUTBOUND-rij stilletjes te overschrijven (de oorspronkelijke bug: een FAILED-markering die
+     * later weer door de OUTBOUND-flow werd overschreven met DELIVERED).
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void persistFailed(EbxmlMessageHeader header, String rawSoap, String clientOin, String errorMessage) {
@@ -65,18 +91,28 @@ public class InboundMessageTrackingService {
             log.warn("[INBOUND] Kon FAILED-bericht niet persisteren: messageId ontbreekt in header");
             return;
         }
-        messageRepository.findByMessageId(messageId)
-            .map(existing -> {
-                existing.setStatus(MessageStatus.FAILED);
-                existing.setErrorMessage(errorMessage);
-                return messageRepository.save(existing);
-            })
-            .orElseGet(() -> {
-                EbmsMessageEntity entity = buildEntity(header, rawSoap, clientOin);
-                entity.setStatus(MessageStatus.FAILED);
-                entity.setErrorMessage(errorMessage);
-                return messageRepository.save(entity);
-            });
+        Optional<EbmsMessageEntity> existing = findExistingInbound(messageId);
+        if (existing.isPresent()) {
+            EbmsMessageEntity entity = existing.get();
+            entity.setStatus(MessageStatus.FAILED);
+            entity.setErrorMessage(errorMessage);
+            messageRepository.save(entity);
+            return;
+        }
+        try {
+            EbmsMessageEntity entity = buildEntity(header, rawSoap, clientOin);
+            entity.setStatus(MessageStatus.FAILED);
+            entity.setErrorMessage(errorMessage);
+            messageRepository.save(entity);
+        } catch (DataIntegrityViolationException e) {
+            log.error("[INBOUND] Kon FAILED-bericht NIET persisteren: messageId={} bestaat al als bericht met "
+                + "een andere richting (unique constraint op message_id) - de bestaande rij is NIET "
+                + "overschreven. Oorspronkelijke reden voor afwijzing: {}", messageId, errorMessage);
+        }
+    }
+
+    private Optional<EbmsMessageEntity> findExistingInbound(String messageId) {
+        return messageRepository.findByMessageIdAndDirection(messageId, MessageDirection.INBOUND);
     }
 
     private EbmsMessageEntity buildEntity(EbxmlMessageHeader header, String rawSoap, String clientOin) {

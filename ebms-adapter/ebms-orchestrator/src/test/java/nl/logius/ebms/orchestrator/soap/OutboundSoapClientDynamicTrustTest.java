@@ -57,6 +57,7 @@ class OutboundSoapClientDynamicTrustTest {
         "<soap:Header/><soap:Body/></soap:Envelope>";
 
     @Mock CpaValidationService cpaValidationService;
+    @Mock SoapHelper soapHelper;
 
     private OutboundSoapClient client;
 
@@ -64,7 +65,7 @@ class OutboundSoapClientDynamicTrustTest {
     void setUp() {
         EbmsOutboundSSLProperties sslProps = new EbmsOutboundSSLProperties();
         // Leave keystore-path blank so buildDynamicSslContext takes the trust-only branch.
-        client = new OutboundSoapClient(sslProps, cpaValidationService);
+        client = new OutboundSoapClient(sslProps, cpaValidationService, soapHelper);
     }
 
     // (a) https + valid partner cert -> SSLContext built OK, dispatch attempted (fails w/ CONNECTION_ERROR

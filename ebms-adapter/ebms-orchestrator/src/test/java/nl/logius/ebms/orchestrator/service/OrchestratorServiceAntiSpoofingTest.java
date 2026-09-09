@@ -104,7 +104,7 @@ class OrchestratorServiceAntiSpoofingTest {
         assertThat(response).isNotNull();
         verify(cpaValidationService).validateCpaAndOin(CPA_ID, FROM_OIN);
         verify(trackingService).persistReceived(eq(header), anyString(), eq(FROM_OIN));
-        verify(trackingService).markProcessing(MESSAGE_ID);
+        verify(trackingService).markDelivered(MESSAGE_ID);
         verify(trackingService, never()).persistFailed(any(), any(), any(), any());
         verify(rabbitTemplate, org.mockito.Mockito.atLeastOnce())
             .convertAndSend(anyString(), anyString(), (Object) any());

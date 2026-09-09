@@ -7,6 +7,7 @@ import nl.logius.ebms.common.model.cpa.DeliveryChannelDto;
 import nl.logius.ebms.common.model.ebxml.*;
 import nl.logius.ebms.orchestrator.config.RabbitMqConfig;
 import nl.logius.ebms.orchestrator.entity.EbmsMessageEntity;
+import nl.logius.ebms.orchestrator.entity.MessageDirection;
 import nl.logius.ebms.orchestrator.entity.MessageStatus;
 import nl.logius.ebms.orchestrator.repository.EbmsMessageRepository;
 import nl.logius.ebms.orchestrator.service.CpaChannelCacheService;
@@ -157,7 +158,7 @@ class OutboundPipelineIntegrationTest {
         verify(outboundSoapClient).send(eq(ENDPOINT), anyString(), anyString(), anyString());
 
         // DB: velden correct opgeslagen
-        EbmsMessageEntity entity = messageRepository.findByMessageId(msgId).orElseThrow();
+        EbmsMessageEntity entity = messageRepository.findByMessageIdAndDirection(msgId, MessageDirection.OUTBOUND).orElseThrow();
         assertThat(entity.getCpaId()).isEqualTo(CPA_ID);
         assertThat(entity.getFromPartyId()).isEqualTo(FROM_OIN);
         assertThat(entity.getToPartyId()).isEqualTo(TO_OIN);
@@ -184,7 +185,7 @@ class OutboundPipelineIntegrationTest {
         verify(outboundSoapClient).send(eq(ENDPOINT), anyString(), anyString(), anyString());
 
         // RM: AckRequested=true, status SENT (niet DELIVERED)
-        EbmsMessageEntity entity = messageRepository.findByMessageId(msgId).orElseThrow();
+        EbmsMessageEntity entity = messageRepository.findByMessageIdAndDirection(msgId, MessageDirection.OUTBOUND).orElseThrow();
         assertThat(entity.isAckRequested()).isTrue();
         assertThat(entity.getStatus()).isEqualTo(MessageStatus.SENT);
     }
@@ -229,7 +230,7 @@ class OutboundPipelineIntegrationTest {
         verify(cryptoServiceClient).sign(anyString(), eq("signing-key"), eq(msgId));
         verify(cryptoServiceClient, never()).encrypt(any(), any(), any());
 
-        EbmsMessageEntity entity = messageRepository.findByMessageId(msgId).orElseThrow();
+        EbmsMessageEntity entity = messageRepository.findByMessageIdAndDirection(msgId, MessageDirection.OUTBOUND).orElseThrow();
         assertThat(entity.isAckRequested()).isTrue();
     }
 
@@ -260,7 +261,7 @@ class OutboundPipelineIntegrationTest {
             anyString(), anyString());
 
         // RM: AckRequested=true + SENT-status
-        EbmsMessageEntity entity = messageRepository.findByMessageId(msgId).orElseThrow();
+        EbmsMessageEntity entity = messageRepository.findByMessageIdAndDirection(msgId, MessageDirection.OUTBOUND).orElseThrow();
         assertThat(entity.isAckRequested()).isTrue();
         assertThat(entity.getRawSoapXml()).startsWith("ENCRYPTED:SIGNED:");
     }
@@ -361,7 +362,7 @@ class OutboundPipelineIntegrationTest {
 
         awaitStatus(msgId, MessageStatus.DELIVERED);
 
-        EbmsMessageEntity entity = messageRepository.findByMessageId(msgId).orElseThrow();
+        EbmsMessageEntity entity = messageRepository.findByMessageIdAndDirection(msgId, MessageDirection.OUTBOUND).orElseThrow();
         assertThat(entity.getPayloadRef()).isEqualTo("s3://ebms-payloads/out-payload-001.xml");
         assertThat(entity.getPayloadContentType()).isEqualTo("application/xml");
     }
@@ -484,7 +485,7 @@ class OutboundPipelineIntegrationTest {
             .pollInterval(Duration.ofMillis(250))
             .untilAsserted(() -> {
                 EbmsMessageEntity entity =
-                    messageRepository.findByMessageId(messageId).orElseThrow(
+                    messageRepository.findByMessageIdAndDirection(messageId, MessageDirection.OUTBOUND).orElseThrow(
                         () -> new AssertionError(
                             "Bericht nog niet gepersisteerd: messageId=" + messageId));
                 assertThat(entity.getStatus())

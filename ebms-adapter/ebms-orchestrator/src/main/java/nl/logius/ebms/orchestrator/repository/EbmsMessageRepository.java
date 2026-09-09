@@ -21,7 +21,15 @@ public interface EbmsMessageRepository extends JpaRepository<EbmsMessageEntity, 
     /** Duplicate suppression: bestaat het bericht al in de database? */
     boolean existsByMessageId(String messageId);
 
-    Optional<EbmsMessageEntity> findByMessageId(String messageId);
+    /**
+     * Zoek een bericht op messageId + richting. Gebruikt door {@code InboundMessageTrackingService}
+     * en {@code OutboundMessageTrackingService} zodat een INBOUND-persistentie nooit per ongeluk de
+     * OUTBOUND-rij (of vice versa) vindt en overschrijft wanneer een messageId toevallig aan beide
+     * richtingen hangt (bv. een loopback-testscenario). De {@code uq_message_id}-constraint blijft
+     * wel globaal uniek, dus een echte botsing resulteert bewust in een zichtbare fout i.p.v. een
+     * stille overschrijving - zie {@code persistFailed}/{@code createOrUpdateProcessing}.
+     */
+    Optional<EbmsMessageEntity> findByMessageIdAndDirection(String messageId, MessageDirection direction);
 
     /** Zoek het originele bericht op status, gebruikt voor ACK-afhandeling. */
     Optional<EbmsMessageEntity> findByMessageIdAndStatus(String messageId, MessageStatus status);

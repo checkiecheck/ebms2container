@@ -39,7 +39,15 @@ public class OutboundMessageService {
     private static final Set<String> NON_RETRYABLE_ERROR_CODES = Set.of(
             "CHANNEL_NOT_FOUND",
             "INVALID_HEADER",
-            "CPA_NOT_FOUND"
+            "CPA_NOT_FOUND",
+            // O-5: signing/encryptie-fouten (XmlSecurityException) zijn per definitie niet
+            // herstelbaar door opnieuw te proberen (bv. onbekende key-alias) - zonder deze regel
+            // requeue't zo'n permanente fout oneindig i.p.v. naar de DLQ te gaan.
+            "SecurityFailure",
+            // O-7: een ebXML ErrorList-afwijzing van de partner (zie OutboundSoapClient) is een
+            // functionele weigering, geen transiënte netwerkfout - opnieuw aanbieden verandert
+            // niets aan het resultaat.
+            "PARTNER_REJECTED"
     );
 
     private final CpaChannelCacheService cpaChannelCacheService;

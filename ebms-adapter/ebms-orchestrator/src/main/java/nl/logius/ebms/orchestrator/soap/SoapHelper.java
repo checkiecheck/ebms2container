@@ -296,6 +296,41 @@ public class SoapHelper {
         }
     }
 
+    /**
+     * Detecteert een ebXML {@code eb:ErrorList} in het SOAP-antwoord van een partner
+     * (ISO 15000-2 §4.1.6). Dit is de ebXML-equivalent van een SOAP {@code Fault}, maar zit in de
+     * SOAP-header i.p.v. de body - {@code SOAPBody#hasFault()} alleen mist deze afwijzingen dus
+     * volledig (zie {@link #createErrorResponse}, dat exact zo'n header-only respons opbouwt).
+     *
+     * @return foutdetail als er een ErrorList aanwezig is, anders {@code null}
+     */
+    public EbxmlError parseErrorList(SOAPMessage message) {
+        try {
+            SOAPHeader header = message.getSOAPHeader();
+            if (header == null) return null;
+            NodeList errorLists = header.getElementsByTagNameNS(EBXML_MSG_NS, "ErrorList");
+            if (errorLists.getLength() == 0) return null;
+
+            Element errorListEl = (Element) errorLists.item(0);
+            NodeList errors = errorListEl.getElementsByTagNameNS(EBXML_MSG_NS, "Error");
+            if (errors.getLength() == 0) {
+                return new EbxmlError("EBXML_ERROR", "ErrorList zonder Error-detail ontvangen");
+            }
+            Element errorEl = (Element) errors.item(0);
+            String errorCode = errorEl.getAttributeNS(EBXML_MSG_NS, "errorCode");
+            String description = getChildText(errorEl, "Description");
+            return new EbxmlError(
+                errorCode != null && !errorCode.isBlank() ? errorCode : "EBXML_ERROR",
+                description != null ? description : "Geen foutbeschrijving opgegeven");
+        } catch (Exception e) {
+            log.warn("Kon ErrorList niet parsen uit SOAP-antwoord: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    /** Foutdetail uit een ebXML {@code eb:ErrorList}-respons van een partner. */
+    public record EbxmlError(String errorCode, String description) {}
+
     /** Converteert een SOAP-bericht naar een XML-string (voor logging/opslag). */
     public String soapToString(SOAPMessage message) {
         try (java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream()) {

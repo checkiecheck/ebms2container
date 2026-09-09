@@ -159,7 +159,7 @@ class InboundPipelineIntegrationTest {
         verify(cryptoServiceClient, never()).verify(any(), any());
 
         // DB: ontsleuteld bericht opgeslagen
-        EbmsMessageEntity entity = messageRepository.findByMessageId("msg-enc-001").orElseThrow();
+        EbmsMessageEntity entity = messageRepository.findByMessageIdAndDirection("msg-enc-001", MessageDirection.INBOUND).orElseThrow();
         assertThat(entity.getStatus()).isEqualTo(MessageStatus.PROCESSING);
         assertThat(entity.getRawSoapXml()).isEqualTo(decryptedSoap);
         assertThat(entity.getDirection()).isEqualTo(MessageDirection.INBOUND);
@@ -195,7 +195,7 @@ class InboundPipelineIntegrationTest {
         verify(cryptoServiceClient).verify(eq(signedSoap), eq("msg-sig-001"));
 
         // DB: originele (niet-gewijzigde) SOAP opgeslagen
-        EbmsMessageEntity entity = messageRepository.findByMessageId("msg-sig-001").orElseThrow();
+        EbmsMessageEntity entity = messageRepository.findByMessageIdAndDirection("msg-sig-001", MessageDirection.INBOUND).orElseThrow();
         assertThat(entity.getStatus()).isEqualTo(MessageStatus.PROCESSING);
         assertThat(entity.getRawSoapXml()).isEqualTo(signedSoap);
     }
@@ -232,7 +232,7 @@ class InboundPipelineIntegrationTest {
             .verify(eq(decryptedSoap), eq("msg-full-001"));
 
         // DB: ontsleutelde SOAP opgeslagen, ackRequested=true
-        EbmsMessageEntity entity = messageRepository.findByMessageId("msg-full-001").orElseThrow();
+        EbmsMessageEntity entity = messageRepository.findByMessageIdAndDirection("msg-full-001", MessageDirection.INBOUND).orElseThrow();
         assertThat(entity.getStatus()).isEqualTo(MessageStatus.PROCESSING);
         assertThat(entity.getRawSoapXml()).isEqualTo(decryptedSoap);
         assertThat(entity.isAckRequested()).isTrue();
@@ -296,7 +296,7 @@ class InboundPipelineIntegrationTest {
 
         // Bericht MOET zichtbaar zijn als FAILED (regressie-fix: voorheen spoorloos verdwenen
         // door de @Transactional-rollback die ook de PROCESSING-rij terugdraaide).
-        EbmsMessageEntity failed = messageRepository.findByMessageId("msg-badsig-001").orElseThrow();
+        EbmsMessageEntity failed = messageRepository.findByMessageIdAndDirection("msg-badsig-001", MessageDirection.INBOUND).orElseThrow();
         assertThat(failed.getStatus()).isEqualTo(MessageStatus.FAILED);
         assertThat(failed.getErrorMessage()).contains("Handtekening ongeldig");
     }
@@ -340,7 +340,7 @@ class InboundPipelineIntegrationTest {
         verifyNoInteractions(cryptoServiceClient);
 
         // Bericht MOET zichtbaar zijn als FAILED (regressie-fix, zie test hierboven).
-        EbmsMessageEntity failed = messageRepository.findByMessageId("msg-cpablock-001").orElseThrow();
+        EbmsMessageEntity failed = messageRepository.findByMessageIdAndDirection("msg-cpablock-001", MessageDirection.INBOUND).orElseThrow();
         assertThat(failed.getStatus()).isEqualTo(MessageStatus.FAILED);
         assertThat(failed.getErrorMessage()).contains("CPA niet gevonden");
     }
@@ -358,7 +358,7 @@ class InboundPipelineIntegrationTest {
         orchestratorService.handleAcknowledgment("msg-ack-001");
 
         // DB: SENT → DELIVERED
-        EbmsMessageEntity updated = messageRepository.findByMessageId("msg-ack-001").orElseThrow();
+        EbmsMessageEntity updated = messageRepository.findByMessageIdAndDirection("msg-ack-001", MessageDirection.INBOUND).orElseThrow();
         assertThat(updated.getStatus()).isEqualTo(MessageStatus.DELIVERED);
 
         // AMQP: EbmsAckEvent op ebms.ack.events

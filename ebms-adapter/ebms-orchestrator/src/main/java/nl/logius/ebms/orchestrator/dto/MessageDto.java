@@ -29,7 +29,9 @@ public record MessageDto(
     boolean ackRequested,
     String payloadContentType,
     String payloadRef,
-    String rawSoapXml
+    String rawSoapXml,
+    int duplicateCount,
+    Instant lastDuplicateAt
 ) {
     public static MessageDto from(EbmsMessageEntity e) {
         return new MessageDto(
@@ -50,7 +52,9 @@ public record MessageDto(
             e.isAckRequested(),
             e.getPayloadContentType(),
             e.getPayloadRef(),
-            e.getRawSoapXml()
+            e.getRawSoapXml(),
+            e.getDuplicateCount(),
+            e.getLastDuplicateAt()
         );
     }
 }

@@ -145,8 +145,8 @@ public class OrchestratorService {
                 .result("SUCCESS")
                 .build());
 
-            // 8. Update status naar PROCESSING
-            trackingService.markProcessing(messageId);
+            // 8. Update status naar DELIVERED (succesvol op AMQP inbound-queue gepubliceerd)
+            trackingService.markDelivered(messageId);
 
             // 9. Construeer en retourneer SOAP ACK (alleen bij rm-profielen)
             boolean needsAck = header.getAckRequested() != null;
@@ -397,7 +397,8 @@ public class OrchestratorService {
     }
 
     private void persistDuplicate(String messageId, EbxmlMessageHeader header) {
-        // Log alleen; origineel bericht blijft ongewijzigd
+        // Origineel bericht blijft ongewijzigd; duplicaat-telling wordt apart bijgehouden
+        trackingService.recordDuplicate(messageId);
         publishAudit(AuditEvent.builder()
             .eventType("MESSAGE_DUPLICATE")
             .messageId(messageId)

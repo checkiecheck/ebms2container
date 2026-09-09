@@ -61,11 +61,14 @@ public class OutboundSoapClient {
 
     private final EbmsOutboundSSLProperties sslProperties;
     private final CpaValidationService cpaValidationService;
+    private final SoapHelper soapHelper;
 
     public OutboundSoapClient(EbmsOutboundSSLProperties sslProperties,
-                               CpaValidationService cpaValidationService) {
+                               CpaValidationService cpaValidationService,
+                               SoapHelper soapHelper) {
         this.sslProperties = sslProperties;
         this.cpaValidationService = cpaValidationService;
+        this.soapHelper = soapHelper;
     }
 
     /**
@@ -122,6 +125,19 @@ public class OutboundSoapClient {
                 log.error("[OUTBOUND] SOAP Fault ontvangen van {}: {}", endpointUrl, faultString);
                 throw new EbmsException("SOAP_FAULT",
                     "SOAP Fault van partner endpoint (" + endpointUrl + "): " + faultString);
+            }
+
+            // ── 6b. ebXML ErrorList check (partnerafwijzing zonder native SOAP Fault) ──
+            // Een ebMS2-afwijzing (bv. SecurityFailure, ValueNotRecognized) zit als eb:ErrorList
+            // in de SOAP-header, niet als SOAP-Fault in de body - zonder deze check werd zo'n
+            // afwijzing als succesvolle aflevering geboekt (zie createErrorResponse()).
+            SoapHelper.EbxmlError ebxmlError = response != null ? soapHelper.parseErrorList(response) : null;
+            if (ebxmlError != null) {
+                log.error("[OUTBOUND] ebXML ErrorList ontvangen van {}: errorCode={} beschrijving={}",
+                    endpointUrl, ebxmlError.errorCode(), ebxmlError.description());
+                throw new EbmsException("PARTNER_REJECTED",
+                    "ebXML ErrorList van partner endpoint (" + endpointUrl + "): ["
+                        + ebxmlError.errorCode() + "] " + ebxmlError.description());
             }
 
             log.info("[OUTBOUND] Verzending geslaagd naar endpoint={}", endpointUrl);

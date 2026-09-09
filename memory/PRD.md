@@ -722,6 +722,47 @@ INBOUND bericht dat vastzat op PROCESSING liep elke ~10 minuten in een eindeloze
   fallback timeout: not a proxy instance"` in `OutboundSoapClient` — niet-kritiek, apart op te
   pakken indien gewenst.
 
+### Kritieke bugfix: OIN-spoofing afwijzing verdween door messageId-botsing + ebXML ErrorList niet gedetecteerd (voltooid – september 2026)
+- **Directe aanleiding:** gebruiker deed een self-loopback-test (outbound-bericht stuurt naar het
+  eigen `/services/ebms`-endpoint) zonder `X-Forwarded-Client-OIN`-header; de afwijzing werd
+  gelogd maar verscheen niet als FAILED-rij in `ebms_message`. Op verzoek van gebruiker eerst een
+  volledige DevAgent-audit uitgevoerd tegen een functionele scenario-matrix (I-1 t/m I-8 inbound,
+  O-1 t/m O-7 outbound) vóórdat er iets werd gefixed.
+- **Root cause 1 (Bug A):** `InboundMessageTrackingService`/`OutboundMessageTrackingService`
+  zochten via `findByMessageId()` zonder `direction`-filter. Bij een messageId-botsing tussen
+  INBOUND en OUTBOUND (self-loopback) overschreef de inbound FAILED-write de bestaande OUTBOUND-rij.
+- **Root cause 2 (Bug B, generiek – niet alleen loopback):** `OutboundSoapClient.send()` checkte
+  alleen `SOAPBody#hasFault()`. `SoapHelper.createErrorResponse()` bouwt een ebXML `eb:ErrorList`
+  in de SOAP-HEADER (geen native Fault) — elke ebXML-partnerafwijzing (SecurityFailure,
+  ValueNotRecognized, etc.) werd daardoor als succesvolle `DELIVERED` geboekt.
+- [x] `EbmsMessageRepository.findByMessageIdAndDirection(messageId, direction)` (NIEUW, vervangt
+  het ongebruikte `findByMessageId`); `uq_message_id` blijft globaal uniek in de DB, dus een echte
+  botsing geeft nu een zichtbare ERROR-log i.p.v. een stille overschrijving (`persistFailed`/
+  `createOrUpdateProcessing` vangen `DataIntegrityViolationException` expliciet op)
+- [x] `SoapHelper.parseErrorList()` + nested record `EbxmlError` (NIEUW) – detecteert `eb:ErrorList`
+  in de SOAP-header; `OutboundSoapClient` gooit nu `EbmsException("PARTNER_REJECTED", ...)` i.p.v.
+  het antwoord als succes te behandelen
+- [x] `OutboundMessageService.NON_RETRYABLE_ERROR_CODES` uitgebreid met `PARTNER_REJECTED` (O-7)
+  én `SecurityFailure` (O-5 – crypto/signing-fouten via `XmlSecurityException` requeueten anders
+  oneindig bij een permanente fout, bv. onbekende key-alias)
+- [x] I-7 (Dubbel Bericht): nieuwe kolommen `duplicate_count`/`last_duplicate_at` (`V5__add_
+  duplicate_tracking.sql`) + `InboundMessageTrackingService.recordDuplicate()` – origineel bericht
+  (status/content) blijft ongewijzigd, duplicaat-pogingen worden nu alsnog zichtbaar
+- [x] I-1/I-2/I-3: `markProcessing` → `markDelivered` hernoemd, aangeroepen ná succesvolle AMQP-
+  publish naar de inbound-queue (was voorheen PROCESSING, bleef daar voor altijd staan bij een
+  best-effort/RM happy flow — geen enkele stap zette INBOUND ooit op DELIVERED)
+- [x] `MessageDto` uitgebreid met `duplicateCount`/`lastDuplicateAt` (admin-API, geen UI-wijziging
+  in deze beurt)
+- **Bekende, bewust niet volledig opgeloste restrictie:** `message_id` is DB-globaal uniek (niet
+  per richting) — bij een écht coïncidente messageId tussen INBOUND en OUTBOUND (alleen realistisch
+  bij loopback-tests, niet in productie met gescheiden zender/ontvanger) blijft de INBOUND FAILED-
+  write gedropt met alleen een ERROR-log (bewuste keuze: OUTBOUND-rij niet corrumperen). Optioneel
+  vervolgwerk (nog niet gebouwd): Micrometer-counter voor dit geval i.p.v. enkel log-scraping.
+- **Testing_agent verificatie (geslaagd):** `mvn -am compile` BUILD SUCCESS (4 modules); 47/47
+  surefire-tests groen (12 nieuwe gerichte Mockito-tests + 35 bestaand, incl. migratie van 17
+  Testcontainers-testcallsites naar `findByMessageIdAndDirection`). Geen Docker/RabbitMQ/Postgres
+  end-to-end run (bekende sandbox-restrictie, zoals eerdere fases).
+
 ### P0 – Fase 4: auditor-service (GEPARKEERD IN BACKLOG)
 - **Discussie (augustus 2026):** gebruiker wil niet noodzakelijk een eigen microservice bouwen
   om `ebms.audit.events` (queue bestaat al, zie `RabbitMqConfig.QUEUE_AUDIT`, gepubliceerd door
