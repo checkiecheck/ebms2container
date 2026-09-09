@@ -1,0 +1,40 @@
+{
+  "summary": "Phase-1 outbound rollback bug fix verified. Ran ebms-orchestrator Maven test suite (excluding Testcontainers integration test since Docker is unavailable in this environment). All 31 unit tests pass, including all 7 scenarios of the rewritten OutboundMessageServiceRollbackTest that validate the new OutboundMessageTrackingService contract (markFailed on send-failure, no markSentOrDelivered on failure, nack requeue=true for RuntimeException, nack requeue=false for non-retryable EbmsException like CHANNEL_NOT_FOUND, happy-path DELIVERED, top-level messageId fallback to header.messageInfo.messageId, hard-reject with verifyNoInteractions on tracking-service when both messageIds are missing, null-header rejection). Code review of OutboundMessageService.java and OutboundMessageTrackingService.java confirms the architectural fix: @Transactional removed from listener, TransactionAspectSupport.setRollbackOnly() gone, three tracking methods each annotated Propagation.REQUIRES_NEW, createOrUpdateProcessing invoked BEFORE channel lookup / SOAP build / sign / encrypt / send so a PROCESSING row exists prior to any risky step; catch(EbmsException) and catch(Exception) both call trackingService.markFailed(...) which commits in its own transaction and therefore survives even though the outer flow nacks. resolveMessageId() correctly falls back to header.messageInfo.messageId and returns null only when both are missing (guarding the NOT-NULL/UNIQUE DB column). NON_RETRYABLE_ERROR_CODES set unchanged. The Testcontainers-based OutboundPipelineIntegrationTest could not be executed because Docker is not available in this sandbox (IllegalStateException: 'Could not find a valid Docker environment') — this is an environment limitation, not a code regression. The test class compiles cleanly and is unchanged apart from a javadoc @link fix per the request.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/ebms-adapter/ebms-orchestrator/target/surefire-reports/nl.logius.ebms.orchestrator.service.OutboundMessageServiceRollbackTest.txt",
+    "/app/ebms-adapter/ebms-orchestrator/src/test/java/nl/logius/ebms/orchestrator/service/OutboundMessageServiceRollbackTest.java",
+    "/app/ebms-adapter/ebms-orchestrator/src/test/java/nl/logius/ebms/orchestrator/OutboundPipelineIntegrationTest.java"
+  ],
+  "action_items": [
+    "OutboundPipelineIntegrationTest (Testcontainers, needs Docker for postgres+rabbitmq) was NOT executed here — no Docker daemon in this sandbox. Please run it locally / in CI with Docker to fully validate the 10 pipeline scenarios (osb-be/osb-rm/osb-be-s/osb-rm-s/osb-rm-e happy paths, null-header rejection, EbmsException retry-then-DELIVERED, audit event, payload metadata, 5 parallel messages).",
+    "Phase 2 (inbound OrchestratorService.processInboundMessage same architectural flaw) is intentionally out of scope this iteration per user's instruction — schedule as a follow-up commit after user validates Phase 1 in K8s."
+  ],
+  "critical_code_review_comments": [
+    "Correct architectural fix: OutboundMessageService no longer transactional; tracking delegated to OutboundMessageTrackingService with Propagation.REQUIRES_NEW on all three methods — guarantees PROCESSING/FAILED rows survive an outer nack.",
+    "resolveMessageId() correctly guards the NOT-NULL/UNIQUE messageId DB constraint: nack(requeue=false) with NO persist attempt when both message.messageId and header.messageInfo.messageId are missing (verified by verifyNoInteractions(trackingService) in the unit test).",
+    "createOrUpdateProcessing() uses idempotent upsert keyed by messageId (findByMessageId → map/orElseGet), so the two invocations (early PROCESSING + enrich after SOAP+sign+encrypt) do not violate the UNIQUE constraint.",
+    "markFailed() / markSentOrDelivered() are defensive: they log a warning instead of throwing when the row is unexpectedly absent (ifPresentOrElse), avoiding double-fault masking of the original error.",
+    "Minor observation (not a bug, informational): OutboundMessageTrackingService fields fromPartyId/toPartyId default to the string 'UNKNOWN' when header.from/to are empty. On the outbound path extractToPartyId() would already have thrown INVALID_HEADER before enrich, but during the FIRST createOrUpdateProcessing call (pre-channel-lookup) an empty from/to list would silently write UNKNOWN. Consider a stricter validation earlier if empty from/to lists should be rejected outright — not blocking, not part of this iteration's scope.",
+    "Minor observation: In catch(Exception e) the message stored is exceptionClassName+': '+e.getMessage(); if e.getMessage() is null the persisted error_message becomes 'ClassName: null'. Acceptable but consider Objects.toString(e.getMessage(),'<no message>') for cleaner admin-UI display."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100% (31/31 unit tests, integration test unrunnable due to no Docker)",
+    "frontend": "N/A (backend-only change)"
+  },
+  "test_credentials": "N/A",
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Phase-1 outbound rollback fix is validated at unit level (Mockito). The Testcontainers OutboundPipelineIntegrationTest could not run here — Docker daemon is not present in this Kubernetes sandbox. Environment: Java 17 (pom java.version=17), Maven 3.8.7. To rerun: `cd /app/ebms-adapter && mvn -pl ebms-orchestrator -am test -Dtest=OutboundMessageServiceRollbackTest -Dsurefire.failIfNoSpecifiedTests=false`. Phase 2 (inbound) still pending per user instruction.",
+  "rca of the issue": "Original bug: OutboundMessageService.handleOutboundMessage() was annotated @Transactional at method scope AND called TransactionAspectSupport.currentTransactionStatus().setRollbackOnly() in its catch block. Any exception after the initial persistOutboundMessage() (e.g. CryptoServiceClient.sign() NPE, encrypt failure, outboundSoapClient.send() network failure) triggered rollback of the whole transaction, which also erased the just-inserted PROCESSING row from ebms_message. Consequence: failed outbound messages left ZERO trace in DB/admin-UI, and the MessageStatusReconciliationScheduler / retryFailedMessages() had no FAILED rows to retry. Fix: extract all DB writes into OutboundMessageTrackingService (three methods, each Propagation.REQUIRES_NEW). handleOutboundMessage is no longer transactional. createOrUpdateProcessing is called (a) immediately after messageId resolution (guarantees a PROCESSING row exists before any risky step) and (b) after SOAP build+sign+encrypt succeed (enrich with rawSoapXml+channel). On failure, markFailed() commits status=FAILED with error_message in its own transaction that survives regardless of outer flow. Additionally: guard against null messageId (both top-level and header.messageInfo) with early nack(requeue=false) and NO persist attempt, since ebms_message.message_id is NOT NULL + UNIQUE."
+}

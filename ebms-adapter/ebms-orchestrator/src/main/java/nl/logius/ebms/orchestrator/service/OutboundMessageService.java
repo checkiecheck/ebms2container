@@ -11,10 +11,6 @@ import nl.logius.ebms.common.model.cpa.DeliveryChannelDto;
 import nl.logius.ebms.common.model.ebxml.EbxmlMessageHeader;
 import nl.logius.ebms.common.model.ebxml.EbxmlProfile;
 import nl.logius.ebms.orchestrator.config.RabbitMqConfig;
-import nl.logius.ebms.orchestrator.entity.EbmsMessageEntity;
-import nl.logius.ebms.orchestrator.entity.MessageDirection;
-import nl.logius.ebms.orchestrator.entity.MessageStatus;
-import nl.logius.ebms.orchestrator.repository.EbmsMessageRepository;
 import nl.logius.ebms.orchestrator.soap.OutboundSoapClient;
 import nl.logius.ebms.orchestrator.soap.SoapHelper;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
@@ -23,14 +19,16 @@ import org.springframework.amqp.support.AmqpHeaders;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.interceptor.TransactionAspectSupport;
 
-import java.time.Instant;
 import java.util.Set;
 
 /**
  * Asynchrone AMQP-consument voor uitgaande ebMS2-berichten.
+ *
+ * <p>De {@code ebms_message}-boekhouding (aanmaken/bijwerken) verloopt volledig via
+ * {@link OutboundMessageTrackingService}, in eigen direct-committende transacties
+ * ({@code REQUIRES_NEW}) — losstaand van of signing/encryptie/verzenden hierna slaagt. Zo blijft
+ * elke poging (geslaagd of mislukt) zichtbaar in {@code ebms_message}/de admin-UI.
  */
 @Service
 @RequiredArgsConstructor
@@ -44,12 +42,12 @@ public class OutboundMessageService {
             "CPA_NOT_FOUND"
     );
 
-    private final EbmsMessageRepository messageRepository;
     private final CpaChannelCacheService cpaChannelCacheService;
     private final CryptoServiceClient cryptoServiceClient;
     private final OutboundSoapClient outboundSoapClient;
     private final SoapHelper soapHelper;
     private final RabbitTemplate rabbitTemplate;
+    private final OutboundMessageTrackingService trackingService;
 
     @Value("${ebms.outbound.signing-key-alias:signing-key}")
     private String defaultSigningKeyAlias;
@@ -57,23 +55,31 @@ public class OutboundMessageService {
     // ── AMQP Listener ─────────────────────────────────────────────────────────
 
     @RabbitListener(queues = RabbitMqConfig.QUEUE_OUTBOUND)
-    @Transactional
     public void handleOutboundMessage(
             EbmsOutboundMessage message,
             Channel amqpChannel,
             @Header(AmqpHeaders.DELIVERY_TAG) long deliveryTag) {
 
-        String messageId = message.getMessageId();
+        EbxmlMessageHeader header = message.getHeader();
+        if (header == null || header.getCpaId() == null) {
+            log.error("[OUTBOUND] Ongeldig bericht: ontbrekende header");
+            nack(amqpChannel, deliveryTag, false); // Gooi weg / stuur naar DLQ
+            return;
+        }
+
+        String messageId = resolveMessageId(message, header);
+        if (messageId == null) {
+            log.error("[OUTBOUND] Ongeldig bericht: messageId ontbreekt (noch top-level, noch header.messageInfo)");
+            nack(amqpChannel, deliveryTag, false); // Gooi weg / stuur naar DLQ - kan niet gepersisteerd worden zonder id
+            return;
+        }
         log.info("[OUTBOUND] Verwerken: messageId={}", messageId);
 
-        try {
-            EbxmlMessageHeader header = message.getHeader();
-            if (header == null || header.getCpaId() == null) {
-                log.error("[OUTBOUND] Ongeldig bericht: messageId={} – ontbrekende header", messageId);
-                nack(amqpChannel, deliveryTag, false); // Gooi weg / stuur naar DLQ
-                return;
-            }
+        // ── Direct persisteren (eigen, altijd-committende transactie) zodat elke poging
+        //    zichtbaar is in ebms_message/UI, ook als signing/encryptie/verzenden hierna faalt.
+        trackingService.createOrUpdateProcessing(messageId, message, header, null, null);
 
+        try {
             String cpaId = header.getCpaId();
             String toPartyId = extractToPartyId(header);
 
@@ -100,22 +106,15 @@ public class OutboundMessageService {
                 rawSoapXml = cryptoServiceClient.encrypt(rawSoapXml, recipientAlias, messageId);
             }
 
-            // ── 5. Persisteer bericht in database (status=PROCESSING) ──────
-            EbmsMessageEntity entity = persistOutboundMessage(message, header, rawSoapXml, channel);
+            // ── 5. Verrijk het gepersisteerde bericht met SOAP-envelop + kanaal ─
+            trackingService.createOrUpdateProcessing(messageId, message, header, rawSoapXml, channel);
 
             // ── 6. Versturen via CXF SOAP-client ──────────────────────────
             outboundSoapClient.send(channel.getEndpointUrl(), rawSoapXml, cpaId, toPartyId);
 
             // ── 7. Status-machine bijwerken ────────────────────────────────
-            if (requireAck) {
-                entity.setStatus(MessageStatus.SENT);
-                entity.setAckRequested(true);
-                log.info("[OUTBOUND] Verzonden (RM) – wacht op ACK: messageId={}", messageId);
-            } else {
-                entity.setStatus(MessageStatus.DELIVERED);
-                log.info("[OUTBOUND] Verzonden (BE) – DELIVERED: messageId={}", messageId);
-            }
-            messageRepository.save(entity);
+            trackingService.markSentOrDelivered(messageId, requireAck);
+            log.info("[OUTBOUND] Verzonden ({}): messageId={}", requireAck ? "RM – wacht op ACK" : "BE – DELIVERED", messageId);
 
             // ── 8. Audit-event publiceren ──────────────────────────────────
             publishAudit(AuditEvent.builder()
@@ -133,73 +132,43 @@ public class OutboundMessageService {
         } catch (EbmsException e) {
             log.error("[OUTBOUND] EbmsException: messageId={} code={} msg={}",
                 messageId, e.getErrorCode(), e.getMessage());
-            
-            TransactionAspectSupport.currentTransactionStatus().setRollbackOnly();
-            
+
+            trackingService.markFailed(messageId, e.getErrorCode() + ": " + e.getMessage());
+
             // Requeue alleen als de fout herstelbaar is (niet bij ontbrekend kanaal of ongeldige data)
             boolean requeue = !NON_RETRYABLE_ERROR_CODES.contains(e.getErrorCode());
             if (!requeue) {
                 log.warn("[OUTBOUND] Niet-herstelbare fout voor messageId={}. Bericht wordt niet opnieuw aangeboden.", messageId);
             }
-            
+
             nack(amqpChannel, deliveryTag, requeue);
 
         } catch (Exception e) {
             log.error("[OUTBOUND] Onverwachte fout: messageId={}", messageId, e);
-            TransactionAspectSupport.currentTransactionStatus().setRollbackOnly();
+            trackingService.markFailed(messageId,
+                e.getClass().getSimpleName() + ": " + (e.getMessage() != null ? e.getMessage() : "<geen detail>"));
             nack(amqpChannel, deliveryTag, true); // Requeue bij onverwachte technische/systeemfouten
         }
     }
 
     // ── Interne helpers ───────────────────────────────────────────────────────
 
-    private EbmsMessageEntity persistOutboundMessage(
-            EbmsOutboundMessage message,
-            EbxmlMessageHeader header,
-            String rawSoapXml,
-            DeliveryChannelDto channel) {
-
-        String fromPartyId = header.getFrom() != null && !header.getFrom().isEmpty()
-            ? header.getFrom().get(0).getValue() : "UNKNOWN";
-        String toPartyId = header.getTo() != null && !header.getTo().isEmpty()
-            ? header.getTo().get(0).getValue() : "UNKNOWN";
+    /**
+     * Conform ebMS2 (ISO 15000-2) hoort de verzendende MSH (dus wij) de MessageId toe te kennen.
+     * Valt terug op {@code header.messageInfo.messageId} als het top-level AMQP-veld ontbreekt,
+     * zodat producenten het niet dubbel hoeven aan te leveren. {@code null} als beide ontbreken.
+     */
+    private String resolveMessageId(EbmsOutboundMessage message, EbxmlMessageHeader header) {
         String messageId = message.getMessageId();
-
-        return messageRepository.findByMessageId(messageId)
-            .map(existing -> {
-                existing.setRawSoapXml(rawSoapXml);
-                existing.setPayloadRef(message.getPayloadRef());
-                existing.setPayloadContentType(message.getPayloadContentType());
-                existing.setStatus(MessageStatus.PROCESSING);
-                log.debug("[OUTBOUND] Idempotente herverwerking: messageId={}", messageId);
-                return messageRepository.save(existing);
-            })
-            .orElseGet(() -> {
-                Instant ttl = channel.getPersistDuration() != null
-                    ? Instant.now().plusSeconds(channel.getPersistDuration()) : null;
-
-                EbmsMessageEntity entity = EbmsMessageEntity.builder()
-                    .messageId(messageId)
-                    .conversationId(header.getConversationId())
-                    .cpaId(header.getCpaId())
-                    .fromPartyId(fromPartyId)
-                    .toPartyId(toPartyId)
-                    .fromRole(header.getFromRole())
-                    .toRole(header.getToRole())
-                    .service(header.getService() != null ? header.getService().getValue() : "UNKNOWN")
-                    .serviceType(header.getService() != null ? header.getService().getType() : null)
-                    .action(header.getAction())
-                    .direction(MessageDirection.OUTBOUND)
-                    .status(MessageStatus.PROCESSING)
-                    .timestamp(Instant.now())
-                    .timeToLive(ttl)
-                    .payloadRef(message.getPayloadRef())
-                    .payloadContentType(message.getPayloadContentType())
-                    .rawSoapXml(rawSoapXml)
-                    .build();
-
-                return messageRepository.save(entity);
-            });
+        if (messageId != null && !messageId.isBlank()) {
+            return messageId;
+        }
+        if (header.getMessageInfo() != null
+                && header.getMessageInfo().getMessageId() != null
+                && !header.getMessageInfo().getMessageId().isBlank()) {
+            return header.getMessageInfo().getMessageId();
+        }
+        return null;
     }
 
     private String extractToPartyId(EbxmlMessageHeader header) {

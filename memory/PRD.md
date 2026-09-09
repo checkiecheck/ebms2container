@@ -653,6 +653,36 @@ INBOUND bericht dat vastzat op PROCESSING liep elke ~10 minuten in een eindeloze
   alleen `payloadRef`/`payloadContentType`. Wordt nu stilletjes genegeerd door Jackson. Gebruiker
   fixt eigen testscript eerst.
 
+### Kritieke bugfix: falende outbound-berichten spoorloos verdwenen (Fase 1/2 – september 2026)
+- **Root cause:** `OutboundMessageService.handleOutboundMessage()` stond onder één `@Transactional`
+  en riep `setRollbackOnly()` aan in de catch-blokken. Elke fout ná de eerste persist (signing-
+  NPE, encryptie-fout, verzend-fout) rolde de **volledige transactie terug**, inclusief de net
+  geschreven PROCESSING-rij. Gevolg: falende outbound-berichten lieten NUL sporen achter in
+  `ebms_message`/de admin-UI, en `retryFailedMessages()` had nooit FAILED-rijen om te herpogen.
+- **Directe aanleiding:** gebruiker vond dit via een eigen K8s-testbericht waarbij `messageId`
+  alleen genest in `header.messageInfo.messageId` stond (niet top-level op `EbmsOutboundMessage`)
+  → `NullPointerException` in `CryptoServiceClient.sign()` (`Map.of()` accepteert geen null) →
+  misleidende `"crypto-service onbereikbaar: null"` (nooit een netwerkfout; DNS/TCP naar
+  crypto-service bleek gezond via `nslookup`/`nc -zv`).
+- [x] **Nieuw:** `OutboundMessageTrackingService` — 3 methoden, elk
+  `@Transactional(propagation = REQUIRES_NEW)`: `createOrUpdateProcessing` (idempotente upsert,
+  aangeroepen zowel vóór als na signing/encryptie), `markSentOrDelivered`, `markFailed`. Elke
+  schrijfactie committed nu onafhankelijk, ongeacht of de rest van de pijplijn faalt.
+- [x] `handleOutboundMessage()` niet meer `@Transactional`; `resolveMessageId()` valt terug op
+  `header.messageInfo.messageId` als het top-level AMQP-veld ontbreekt (conform ebMS2: de
+  verzendende MSH mag/moet de MessageId toekennen); nack(requeue=false) zonder persist-poging als
+  beide ontbreken (DB-kolom `message_id` is NOT NULL + UNIQUE).
+- **Testing_agent verificatie:** 31/31 unit tests groen (Mockito, herschreven
+  `OutboundMessageServiceRollbackTest` — nieuwe contract-tests voor markFailed/markSentOrDelivered/
+  messageId-fallback/hard-reject). **Niet gedraaid:** de Testcontainers-integratietest
+  (`OutboundPipelineIntegrationTest`, 10 scenario's) — geen Docker-daemon beschikbaar in de
+  testomgeving. Code-review bevestigt dat deze test ongewijzigd zou moeten slagen; gebruiker gaat
+  dit zelf in eigen K8s-cluster verifiëren (Fase 1 expliciet zo afgesproken).
+- **Fase 2 (nog te doen, apart akkoord al gegeven):** zelfde architecturale fix toepassen op
+  `OrchestratorService.processInboundMessage()` (nog kritischer: 5 validatiestappen — OIN-
+  antispoofing, CPA-validatie, decryptie, handtekeningverificatie, duplicate-check — vóór persist,
+  dus ook afgewezen/security-verdachte inbound-berichten laten momenteel geen spoor achter).
+
 ### P0 – Fase 4: auditor-service (GEPARKEERD IN BACKLOG)
 - **Discussie (augustus 2026):** gebruiker wil niet noodzakelijk een eigen microservice bouwen
   om `ebms.audit.events` (queue bestaat al, zie `RabbitMqConfig.QUEUE_AUDIT`, gepubliceerd door

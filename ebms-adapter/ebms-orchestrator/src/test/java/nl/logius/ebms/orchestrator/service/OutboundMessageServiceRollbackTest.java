@@ -9,8 +9,6 @@ import nl.logius.ebms.common.model.ebxml.MessageInfo;
 import nl.logius.ebms.common.model.ebxml.PartyId;
 import nl.logius.ebms.common.model.ebxml.ServiceType;
 import nl.logius.ebms.orchestrator.entity.EbmsMessageEntity;
-import nl.logius.ebms.orchestrator.entity.MessageStatus;
-import nl.logius.ebms.orchestrator.repository.EbmsMessageRepository;
 import nl.logius.ebms.orchestrator.soap.OutboundSoapClient;
 import nl.logius.ebms.orchestrator.soap.SoapHelper;
 import org.junit.jupiter.api.BeforeEach;
@@ -18,7 +16,6 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
-import org.mockito.MockedStatic;
 import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -26,67 +23,52 @@ import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.test.util.ReflectionTestUtils;
-import org.springframework.transaction.TransactionStatus;
-import org.springframework.transaction.interceptor.TransactionAspectSupport;
 
 import jakarta.xml.soap.SOAPMessage;
 
 import java.time.Instant;
 import java.util.List;
-import java.util.Optional;
-import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
- * Focused Mockito unit test for OutboundMessageService.handleOutboundMessage()
- * that verifies the @Transactional rollback fix described in the review request.
+ * Focused Mockito unit test for {@code OutboundMessageService.handleOutboundMessage()}.
  *
- * <p>The bug: catch blocks inside the @Transactional method previously swallowed
- * exceptions to call nack(), which meant Spring's transactional interceptor never
- * saw an exception and thus COMMITTED the transaction (including the
- * persistOutboundMessage() write that set status=PROCESSING). The fix adds
- * {@code TransactionAspectSupport.currentTransactionStatus().setRollbackOnly()}
- * so the entire unit of work is rolled back and no stale PROCESSING row remains.
- *
- * <p>This test does NOT hit a real DB (no Testcontainers/Docker in sandbox) — it
- * verifies the CONTRACT by static-mocking TransactionAspectSupport and asserting:
- *   (a) after {@code persistOutboundMessage()} runs and {@code outboundSoapClient.send()}
- *       throws, {@code setRollbackOnly()} is invoked exactly once;
- *   (b) the final status-setter (SENT/DELIVERED) + second save() are NEVER reached;
- *   (c) the AMQP channel is nacked with requeue=true;
- *   (d) on the happy path, {@code setRollbackOnly()} is NEVER invoked.
- *
- * <p>Because Spring's @Transactional honors setRollbackOnly() unconditionally at
- * commit time (this is a stable, documented Spring contract), verifying the call
- * is a valid proxy for "the DB row does not get stuck at PROCESSING".
+ * <p>Vervangt de oude {@code setRollbackOnly()}-gebaseerde test: die aanpak liet een falend
+ * bericht (bv. signing/verzenden mislukt) volledig spoorloos verdwijnen uit {@code ebms_message},
+ * omdat de hele methode onder één {@code @Transactional} stond en elke exception alles terugrolde
+ * — óók de net geschreven PROCESSING-rij. De fix: {@code OutboundMessageService} heeft geen
+ * {@code @Transactional} meer en delegeert alle DB-boekhouding aan
+ * {@link OutboundMessageTrackingService}, die in eigen ({@code REQUIRES_NEW}) transacties werkt.
+ * Deze test verifieert daarom het CONTRACT met die tracking-service in plaats van transactie-
+ * interne Spring-mechanismen.
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
 class OutboundMessageServiceRollbackTest {
 
-    @Mock EbmsMessageRepository      messageRepository;
-    @Mock CpaChannelCacheService     cpaChannelCacheService;
-    @Mock CryptoServiceClient        cryptoServiceClient;
-    @Mock OutboundSoapClient         outboundSoapClient;
-    @Mock SoapHelper                 soapHelper;
-    @Mock RabbitTemplate             rabbitTemplate;
-    @Mock Channel                    amqpChannel;
+    @Mock CpaChannelCacheService        cpaChannelCacheService;
+    @Mock CryptoServiceClient           cryptoServiceClient;
+    @Mock OutboundSoapClient            outboundSoapClient;
+    @Mock SoapHelper                    soapHelper;
+    @Mock RabbitTemplate                rabbitTemplate;
+    @Mock OutboundMessageTrackingService trackingService;
+    @Mock Channel                       amqpChannel;
 
     @InjectMocks OutboundMessageService service;
 
     private EbmsOutboundMessage outboundMessage;
-    private EbmsMessageEntity   persistedEntity;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -111,8 +93,7 @@ class OutboundMessageServiceRollbackTest {
             .payloadContentType("application/xml")
             .build();
 
-        // CPA lookup returns a Best-Effort channel (osb-be) => no signing/encryption =>
-        // exception in outboundSoapClient.send() happens right after persist.
+        // CPA lookup returns a Best-Effort channel (osb-be) => no signing/encryption.
         DeliveryChannelDto channel = DeliveryChannelDto.builder()
             .endpointUrl("https://partner.example/ebms")
             .dkProfile("osb-be")
@@ -120,110 +101,117 @@ class OutboundMessageServiceRollbackTest {
             .build();
         when(cpaChannelCacheService.getChannel(anyString(), anyString())).thenReturn(channel);
 
-        // SoapHelper: return a benign SOAP envelope string.
         SOAPMessage soapMock = mock(SOAPMessage.class);
         when(soapHelper.buildOutboundSoap(any(), anyBoolean())).thenReturn(soapMock);
         when(soapHelper.soapToString(any())).thenReturn("<soap:Envelope/>");
-
-        // Repository: no existing row → orElseGet branch creates a new entity and "saves" it.
-        when(messageRepository.findByMessageId("msg-42")).thenReturn(Optional.empty());
-        when(messageRepository.save(any(EbmsMessageEntity.class))).thenAnswer(inv -> {
-            persistedEntity = inv.getArgument(0);
-            if (persistedEntity.getId() == null) {
-                persistedEntity.setId(UUID.randomUUID());
-            }
-            return persistedEntity;
-        });
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // (A) Failure path: setRollbackOnly() MUST be called when send() throws
+    // (A) Failure path: markFailed() MUST be invoked, markSentOrDelivered() NEVER
     // ─────────────────────────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("send() throws RuntimeException AFTER persist → setRollbackOnly() invoked, no DELIVERED-save, nack(requeue=true)")
-    void sendFails_afterPersist_marksRollbackOnly_noFurtherStatusSave() throws Exception {
-        // Simulate the crash after the entity is persisted with status=PROCESSING.
+    @DisplayName("send() throws RuntimeException → trackingService.markFailed() invoked, geen markSentOrDelivered, nack(requeue=true)")
+    void sendFails_marksFailed_noSentOrDelivered() throws Exception {
         Mockito.doThrow(new RuntimeException("transient network failure"))
             .when(outboundSoapClient).send(anyString(), anyString(), anyString(), anyString());
 
-        TransactionStatus txStatus = mock(TransactionStatus.class);
+        service.handleOutboundMessage(outboundMessage, amqpChannel, 123L);
 
-        try (MockedStatic<TransactionAspectSupport> mocked = mockStatic(TransactionAspectSupport.class)) {
-            mocked.when(TransactionAspectSupport::currentTransactionStatus).thenReturn(txStatus);
+        // Vroege persist (PROCESSING) + enrich-persist (na SOAP-opbouw) zijn allebei geprobeerd.
+        verify(trackingService, times(2)).createOrUpdateProcessing(
+            eq("msg-42"), eq(outboundMessage), any(), any(), any());
 
-            service.handleOutboundMessage(outboundMessage, amqpChannel, 123L);
+        // De fout is vastgelegd als FAILED, ONAFHANKELIJK van de rest van de flow.
+        verify(trackingService, times(1)).markFailed(eq("msg-42"), anyString());
+        verify(trackingService, never()).markSentOrDelivered(anyString(), anyBoolean());
 
-            // 1) The core contract: rollback was requested exactly once.
-            mocked.verify(TransactionAspectSupport::currentTransactionStatus, times(1));
-        }
-        verify(txStatus, times(1)).setRollbackOnly();
-
-        // 2) The pre-crash persist DID happen (row was written with status=PROCESSING),
-        //    proving that WITHOUT the fix this row would silently commit.
-        assertThat(persistedEntity).isNotNull();
-        assertThat(persistedEntity.getStatus())
-            .as("row was persisted at PROCESSING before send() failed – rollback must undo this")
-            .isEqualTo(MessageStatus.PROCESSING);
-
-        // 3) The final DELIVERED/SENT status-setter + second save() were NEVER reached.
-        //    Repository.save() was called exactly once (the initial persist, orElseGet branch).
-        verify(messageRepository, times(1)).save(any(EbmsMessageEntity.class));
-
-        // 4) AMQP nack with requeue=true, no ack.
         verify(amqpChannel, times(1)).basicNack(anyLong(), anyBoolean(), anyBoolean());
         verify(amqpChannel, never()).basicAck(anyLong(), anyBoolean());
     }
 
     @Test
-    @DisplayName("send() throws EbmsException → setRollbackOnly() invoked in EbmsException catch branch")
-    void sendFails_ebmsException_marksRollbackOnly() throws Exception {
-        Mockito.doThrow(new EbmsException("SEND_FAILED", "boom"))
+    @DisplayName("send() throws EbmsException (niet-herstelbare code) → markFailed() + nack(requeue=false)")
+    void sendFails_ebmsException_nonRetryable_noRequeue() throws Exception {
+        Mockito.doThrow(new EbmsException("CHANNEL_NOT_FOUND", "boom"))
             .when(outboundSoapClient).send(anyString(), anyString(), anyString(), anyString());
 
-        TransactionStatus txStatus = mock(TransactionStatus.class);
+        service.handleOutboundMessage(outboundMessage, amqpChannel, 456L);
 
-        try (MockedStatic<TransactionAspectSupport> mocked = mockStatic(TransactionAspectSupport.class)) {
-            mocked.when(TransactionAspectSupport::currentTransactionStatus).thenReturn(txStatus);
-
-            service.handleOutboundMessage(outboundMessage, amqpChannel, 456L);
-
-            mocked.verify(TransactionAspectSupport::currentTransactionStatus, times(1));
-        }
-        verify(txStatus, times(1)).setRollbackOnly();
-        verify(amqpChannel, times(1)).basicNack(anyLong(), anyBoolean(), anyBoolean());
+        verify(trackingService, times(1)).markFailed(eq("msg-42"), anyString());
+        verify(amqpChannel, times(1)).basicNack(anyLong(), anyBoolean(), eq(false));
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // (B) Happy path: setRollbackOnly() MUST NOT be called
+    // (B) Happy path
     // ─────────────────────────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("Happy path (osb-be) → DELIVERED, no setRollbackOnly, basicAck")
-    void happyPath_noRollback_ackSent() throws Exception {
-        // send() returns normally (default void behavior).
+    @DisplayName("Happy path (osb-be) → markSentOrDelivered(requireAck=false), geen markFailed, basicAck")
+    void happyPath_marksDelivered_ackSent() throws Exception {
+        service.handleOutboundMessage(outboundMessage, amqpChannel, 789L);
 
-        try (MockedStatic<TransactionAspectSupport> mocked = mockStatic(TransactionAspectSupport.class)) {
-            service.handleOutboundMessage(outboundMessage, amqpChannel, 789L);
+        verify(trackingService, times(2)).createOrUpdateProcessing(
+            eq("msg-42"), eq(outboundMessage), any(), any(), any());
+        verify(trackingService, times(1)).markSentOrDelivered("msg-42", false);
+        verify(trackingService, never()).markFailed(anyString(), anyString());
 
-            // currentTransactionStatus() must never be looked up on the happy path.
-            mocked.verifyNoInteractions();
-        }
-
-        // Final status was updated to DELIVERED (Best Effort profile).
-        assertThat(persistedEntity.getStatus()).isEqualTo(MessageStatus.DELIVERED);
-        // Two saves: initial PROCESSING persist + final DELIVERED update.
-        verify(messageRepository, times(2)).save(any(EbmsMessageEntity.class));
         verify(amqpChannel, times(1)).basicAck(anyLong(), anyBoolean());
         verify(amqpChannel, never()).basicNack(anyLong(), anyBoolean(), anyBoolean());
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // (C) Builder-with-nullable-version regression: verifies that constructing
-    // an EbmsMessageEntity via the Lombok builder without setting version does
-    // not throw, and leaves version=null (Hibernate assigns 0 on first INSERT
-    // per standard JPA @Version-for-numeric-wrapper semantics; the DB column
-    // default 0 is also in place via V3 migration).
+    // (C) messageId-resolutie: fallback + hard-reject als beide ontbreken
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("Top-level messageId ontbreekt → valt terug op header.messageInfo.messageId")
+    void missingTopLevelMessageId_fallsBackToHeaderMessageInfo() throws Exception {
+        EbmsOutboundMessage withoutTopLevelId = EbmsOutboundMessage.builder()
+            .header(outboundMessage.getHeader()) // messageInfo.messageId = "msg-42"
+            .payloadRef("s3://bucket/payload")
+            .build();
+
+        service.handleOutboundMessage(withoutTopLevelId, amqpChannel, 321L);
+
+        verify(trackingService, times(1)).markSentOrDelivered("msg-42", false);
+        verify(amqpChannel, times(1)).basicAck(anyLong(), anyBoolean());
+    }
+
+    @Test
+    @DisplayName("messageId ontbreekt zowel top-level als in header.messageInfo → nack(requeue=false), geen persist-poging")
+    void missingMessageIdEverywhere_rejectedWithoutPersist() throws Exception {
+        EbxmlMessageHeader headerWithoutMessageInfo = EbxmlMessageHeader.builder()
+            .cpaId("cpa-1")
+            .conversationId("conv-1")
+            .from(List.of(PartyId.builder().value("1").type("URN:OIN").build()))
+            .to(List.of(PartyId.builder().value("2").type("URN:OIN").build()))
+            .service(ServiceType.builder().value("urn:test:service").build())
+            .action("send")
+            .build();
+        EbmsOutboundMessage withoutAnyId = EbmsOutboundMessage.builder()
+            .header(headerWithoutMessageInfo)
+            .build();
+
+        service.handleOutboundMessage(withoutAnyId, amqpChannel, 654L);
+
+        verifyNoInteractions(trackingService);
+        verify(amqpChannel, times(1)).basicNack(anyLong(), anyBoolean(), eq(false));
+    }
+
+    @Test
+    @DisplayName("Null header → nack(requeue=false), geen tracking-service-aanroep")
+    void nullHeader_rejectedWithoutPersist() throws Exception {
+        EbmsOutboundMessage noHeader = EbmsOutboundMessage.builder().messageId("msg-99").build();
+
+        service.handleOutboundMessage(noHeader, amqpChannel, 111L);
+
+        verifyNoInteractions(trackingService);
+        verify(amqpChannel, times(1)).basicNack(anyLong(), anyBoolean(), eq(false));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // (D) Builder-with-nullable-version regression (ongewijzigd, los van deze service)
     // ─────────────────────────────────────────────────────────────────────────
 
     @Test

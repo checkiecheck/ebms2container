@@ -438,7 +438,7 @@ class OutboundPipelineIntegrationTest {
     /**
      * Construeert een minimale maar volledige {@link EbxmlMessageHeader}.
      * Alle velden die door {@link nl.logius.ebms.orchestrator.soap.SoapHelper#buildOutboundSoap}
-     * en {@link nl.logius.ebms.orchestrator.service.OutboundMessageService#persistOutboundMessage}
+     * en {@link nl.logius.ebms.orchestrator.service.OutboundMessageTrackingService#createOrUpdateProcessing}
      * worden gebruikt zijn gevuld.
      */
     private EbxmlMessageHeader buildHeader(String messageId) {
