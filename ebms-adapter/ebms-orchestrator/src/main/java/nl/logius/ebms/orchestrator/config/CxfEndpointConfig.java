@@ -8,6 +8,7 @@ import org.springframework.context.annotation.Configuration;
 
 import nl.logius.ebms.orchestrator.service.OrchestratorService;
 import nl.logius.ebms.orchestrator.soap.EbmsMessageProvider;
+import nl.logius.ebms.orchestrator.soap.EbxmlMustUnderstandInterceptor;
 import nl.logius.ebms.orchestrator.soap.PingEchoService;
 import nl.logius.ebms.orchestrator.soap.RawPayloadCaptureInterceptor;
 import nl.logius.ebms.orchestrator.soap.SoapHelper;
@@ -51,6 +52,10 @@ public class CxfEndpointConfig {
         // Legt de rauwe HTTP-body vast vóór SAAJ-parsing (zie RawPayloadCaptureInterceptor javadoc) —
         // voorkomt digest-mismatches bij XML-DSig verificatie door SAAJ-herserialisatie.
         endpoint.getInInterceptors().add(new RawPayloadCaptureInterceptor());
+        // Declareert de ebXML mustUnderstand="1" headers (MessageHeader/AckRequested/
+        // Acknowledgment/ErrorList) als begrepen - zonder dit wijst CXF's ingebouwde
+        // MustUnderstandInterceptor élk inkomend ebMS2-bericht af vóór EbmsMessageProvider.invoke().
+        endpoint.getInInterceptors().add(new EbxmlMustUnderstandInterceptor());
         endpoint.publish("/ebms");
         return endpoint;
     }
