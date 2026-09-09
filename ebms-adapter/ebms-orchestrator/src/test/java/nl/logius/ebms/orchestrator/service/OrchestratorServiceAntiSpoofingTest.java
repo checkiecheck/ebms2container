@@ -6,8 +6,6 @@ import nl.logius.ebms.common.model.ebxml.EbxmlMessageHeader;
 import nl.logius.ebms.common.model.ebxml.MessageInfo;
 import nl.logius.ebms.common.model.ebxml.PartyId;
 import nl.logius.ebms.common.model.ebxml.ServiceType;
-import nl.logius.ebms.orchestrator.entity.EbmsMessageEntity;
-import nl.logius.ebms.orchestrator.entity.MessageStatus;
 import nl.logius.ebms.orchestrator.repository.EbmsMessageRepository;
 import nl.logius.ebms.orchestrator.soap.SoapHelper;
 import org.junit.jupiter.api.BeforeEach;
@@ -25,12 +23,14 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.Instant;
 import java.util.List;
-import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -39,9 +39,14 @@ import static org.mockito.Mockito.when;
  * Focused Mockito tests for OrchestratorService.processInboundMessage() step-0
  * anti-spoofing OIN validation.
  *
+ * <p>Vervangt de oude versie die direct op {@code messageRepository.save(...)} verifieerde:
+ * persistentie van afgewezen berichten verloopt nu via {@link InboundMessageTrackingService}
+ * (eigen {@code REQUIRES_NEW}-transactie, zie die klasse voor de root-cause). Deze test
+ * verifieert daarom het contract met die tracking-service.
+ *
  * Contract:
  *  (a) clientOin == eb:From/PartyId   -> processing continues normally
- *  (b) mismatch                        -> persisted FAILED + SecurityFailure EbmsException, no downstream calls
+ *  (b) mismatch                        -> trackingService.persistFailed() + SecurityFailure, no downstream calls
  *  (c) blank clientOin + enforce=true  -> reject as SecurityFailure
  *  (d) blank clientOin + enforce=false -> continue, no rejection
  */
@@ -55,6 +60,7 @@ class OrchestratorServiceAntiSpoofingTest {
     @Mock CpaValidationService cpaValidationService;
     @Mock CryptoServiceClient cryptoServiceClient;
     @Mock nl.logius.ebms.orchestrator.config.RetryProperties retryProperties;
+    @Mock InboundMessageTrackingService trackingService;
 
     @InjectMocks OrchestratorService service;
 
@@ -81,13 +87,8 @@ class OrchestratorServiceAntiSpoofingTest {
             .messageInfo(MessageInfo.builder().messageId(MESSAGE_ID).timestamp(Instant.now()).build())
             .build();
 
-        when(messageRepository.save(any(EbmsMessageEntity.class))).thenAnswer(inv -> {
-            EbmsMessageEntity e = inv.getArgument(0);
-            if (e.getId() == null) e.setId(UUID.randomUUID());
-            return e;
-        });
         // Happy-path defaults so case (a) can proceed all the way through.
-        when(cpaValidationService.validateCpaAndOin(anyString(), org.mockito.ArgumentMatchers.nullable(String.class)))
+        when(cpaValidationService.validateCpaAndOin(anyString(), nullable(String.class)))
             .thenReturn(CpaValidationResult.success(null));
         when(soapHelper.hasEncryptedBody(any())).thenReturn(false);
         when(soapHelper.hasSignature(any())).thenReturn(false);
@@ -96,20 +97,21 @@ class OrchestratorServiceAntiSpoofingTest {
     }
 
     @Test
-    @DisplayName("(a) clientOin == eb:From/PartyId -> processing continues, entity saved, AMQP published")
+    @DisplayName("(a) clientOin == eb:From/PartyId -> processing continues, persistReceived aangeroepen, AMQP published")
     void oinMatches_processingContinues() {
         SOAPMessage response = service.processInboundMessage(soapMessage, header, "<raw/>", FROM_OIN);
 
         assertThat(response).isNotNull();
         verify(cpaValidationService).validateCpaAndOin(CPA_ID, FROM_OIN);
-        // At least one save (persist + status update) - proves step 0 did NOT reject.
-        verify(messageRepository, org.mockito.Mockito.atLeastOnce()).save(any(EbmsMessageEntity.class));
+        verify(trackingService).persistReceived(eq(header), anyString(), eq(FROM_OIN));
+        verify(trackingService).markProcessing(MESSAGE_ID);
+        verify(trackingService, never()).persistFailed(any(), any(), any(), any());
         verify(rabbitTemplate, org.mockito.Mockito.atLeastOnce())
             .convertAndSend(anyString(), anyString(), (Object) any());
     }
 
     @Test
-    @DisplayName("(b) clientOin != eb:From/PartyId -> persisted FAILED + SecurityFailure, no CPA/crypto/AMQP inbound")
+    @DisplayName("(b) clientOin != eb:From/PartyId -> trackingService.persistFailed() + SecurityFailure, no CPA/crypto/AMQP inbound")
     void oinMismatch_persistsFailedAndThrows() {
         String spoofedOin = "99999999999999999999";
 
@@ -120,17 +122,16 @@ class OrchestratorServiceAntiSpoofingTest {
             assertThat(ex.getMessage()).contains("identiteitspoofing");
         });
 
-        // Row persisted as FAILED with errorMessage set.
-        ArgumentCaptor<EbmsMessageEntity> cap = ArgumentCaptor.forClass(EbmsMessageEntity.class);
-        verify(messageRepository).save(cap.capture());
-        EbmsMessageEntity saved = cap.getValue();
-        assertThat(saved.getStatus()).isEqualTo(MessageStatus.FAILED);
-        assertThat(saved.getErrorMessage()).isNotBlank().contains(spoofedOin);
+        // FAILED-persistentie met foutdetail, via de tracking-service.
+        ArgumentCaptor<String> errorCap = ArgumentCaptor.forClass(String.class);
+        verify(trackingService).persistFailed(eq(header), eq("<raw/>"), eq(spoofedOin), errorCap.capture());
+        assertThat(errorCap.getValue()).contains(spoofedOin).contains("identiteitspoofing");
 
         // Downstream MUST NOT run.
         verify(cpaValidationService, never()).validateCpaAndOin(anyString(), anyString());
         verify(cryptoServiceClient, never()).decrypt(anyString(), anyString(), anyString());
         verify(cryptoServiceClient, never()).verify(anyString(), anyString());
+        verify(trackingService, never()).persistReceived(any(), any(), any());
     }
 
     @Test
@@ -143,11 +144,10 @@ class OrchestratorServiceAntiSpoofingTest {
         );
 
         verify(cpaValidationService, never()).validateCpaAndOin(anyString(), anyString());
-        // Persisted FAILED with errorMessage referencing the missing-header reason.
-        ArgumentCaptor<EbmsMessageEntity> cap = ArgumentCaptor.forClass(EbmsMessageEntity.class);
-        verify(messageRepository).save(cap.capture());
-        assertThat(cap.getValue().getStatus()).isEqualTo(MessageStatus.FAILED);
-        assertThat(cap.getValue().getErrorMessage()).contains("X-Forwarded-Client-OIN");
+        // FAILED-persistentie met foutdetail dat naar de ontbrekende header verwijst.
+        ArgumentCaptor<String> errorCap = ArgumentCaptor.forClass(String.class);
+        verify(trackingService).persistFailed(eq(header), eq("<raw/>"), isNull(), errorCap.capture());
+        assertThat(errorCap.getValue()).contains("X-Forwarded-Client-OIN");
     }
 
     @Test
@@ -159,9 +159,7 @@ class OrchestratorServiceAntiSpoofingTest {
 
         assertThat(response).isNotNull();
         // Continues into CPA validation (proves no step-0 rejection).
-        verify(cpaValidationService).validateCpaAndOin(eq(CPA_ID), org.mockito.ArgumentMatchers.isNull());
+        verify(cpaValidationService).validateCpaAndOin(eq(CPA_ID), isNull());
+        verify(trackingService, never()).persistFailed(any(), any(), any(), any());
     }
-
-    // Helper for null matcher without static import clash.
-    private static <T> T eq(T v) { return org.mockito.ArgumentMatchers.eq(v); }
 }

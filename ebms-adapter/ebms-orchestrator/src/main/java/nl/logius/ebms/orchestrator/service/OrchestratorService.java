@@ -17,7 +17,6 @@ import nl.logius.ebms.common.model.ebxml.ServiceType;
 import nl.logius.ebms.orchestrator.config.RabbitMqConfig;
 import nl.logius.ebms.orchestrator.config.RetryProperties;
 import nl.logius.ebms.orchestrator.entity.EbmsMessageEntity;
-import nl.logius.ebms.orchestrator.entity.MessageDirection;
 import nl.logius.ebms.orchestrator.entity.MessageStatus;
 import nl.logius.ebms.orchestrator.repository.EbmsMessageRepository;
 import nl.logius.ebms.orchestrator.soap.SoapHelper;
@@ -53,6 +52,7 @@ public class OrchestratorService {
     private final CpaValidationService  cpaValidationService;
     private final CryptoServiceClient   cryptoServiceClient;
     private final RetryProperties       retryProperties;
+    private final InboundMessageTrackingService trackingService;
 
     @Value("${ebms.inbound.decryption-key-alias:encryption-key}")
     private String decryptionKeyAlias;
@@ -71,7 +71,6 @@ public class OrchestratorService {
      * @param clientOin     het OIN uit de X-Forwarded-Client-OIN mTLS-header
      * @return              SOAP ACK-bericht (of lege response bij Best Effort)
      */
-    @Transactional
     public SOAPMessage processInboundMessage(SOAPMessage request,
                                               EbxmlMessageHeader header,
                                               String rawSoap,
@@ -85,85 +84,108 @@ public class OrchestratorService {
             header.getFrom().isEmpty() ? "?" : header.getFrom().get(0).getValue(),
             header.getAction());
 
-        // 0. Anti-spoofing: gateway-geverifieerd OIN (X-Forwarded-Client-OIN) moet overeenkomen
-        //    met het door de partij zelf opgegeven eb:From/PartyId (voorkomt identiteitspoofing).
-        validateInboundOin(header, clientOin, messageId, cpaId, rawSoap);
+        try {
+            // 0. Anti-spoofing: gateway-geverifieerd OIN (X-Forwarded-Client-OIN) moet overeenkomen
+            //    met het door de partij zelf opgegeven eb:From/PartyId (voorkomt identiteitspoofing).
+            validateInboundOin(header, clientOin, messageId);
 
-        // 1. CPA-validatie via cpa-service (fail-closed)
-        CpaValidationResult cpaResult = cpaValidationService.validateCpaAndOin(cpaId, clientOin);
-        if (!cpaResult.isValid()) {
-            log.warn("[CPA-BLOCKED] messageId={} reden={}", messageId, cpaResult.getErrorMessage());
+            // 1. CPA-validatie via cpa-service (fail-closed)
+            CpaValidationResult cpaResult = cpaValidationService.validateCpaAndOin(cpaId, clientOin);
+            if (!cpaResult.isValid()) {
+                log.warn("[CPA-BLOCKED] messageId={} reden={}", messageId, cpaResult.getErrorMessage());
+                throw new EbmsException("CPA_VALIDATION_FAILED", cpaResult.getErrorMessage());
+            }
+
+            // 2. Inbound decryptie (Digikoppeling osb-*-e profielen: decrypt dan verify)
+            String processedSoap = rawSoap;
+            if (soapHelper.hasEncryptedBody(request)) {
+                log.info("[INBOUND] Versleuteld bericht ontvangen – ontsleutelen: messageId={}", messageId);
+                processedSoap = cryptoServiceClient.decrypt(rawSoap, decryptionKeyAlias, messageId);
+                log.info("[INBOUND] Ontsleuteling geslaagd: messageId={}", messageId);
+            }
+
+            // 3. Inbound handtekeningverificatie (Digikoppeling osb-*-s profielen)
+            if (soapHelper.hasSignature(request)) {
+                log.info("[INBOUND] Ondertekend bericht – verificatie: messageId={}", messageId);
+                cryptoServiceClient.verify(processedSoap, messageId);
+                log.info("[INBOUND] Handtekening geverifieerd: messageId={}", messageId);
+            }
+
+            // 4. Duplicate suppression
+            if (messageRepository.existsByMessageId(messageId)) {
+                log.warn("[DUPLICATE] messageId={}", messageId);
+                persistDuplicate(messageId, header);
+                throw new DuplicateMessageException(messageId);
+            }
+
+            // ── Direct persisteren (eigen, altijd-committende transactie) ──
+            trackingService.persistReceived(header, processedSoap, clientOin);
+
+            // 6. Publiceer op AMQP inbound queue
+            EbmsInboundMessage amqpMsg = EbmsInboundMessage.builder()
+                .messageId(messageId)
+                .conversationId(conversationId)
+                .header(header)
+                .rawSoapXml(processedSoap)
+                .receivedAt(Instant.now())
+                .build();
+            rabbitTemplate.convertAndSend(
+                RabbitMqConfig.EXCHANGE_EBMS,
+                RabbitMqConfig.ROUTING_INBOUND,
+                amqpMsg);
+
+            // 7. Publiceer audit-event
+            publishAudit(AuditEvent.builder()
+                .eventType("MESSAGE_RECEIVED")
+                .messageId(messageId)
+                .conversationId(conversationId)
+                .cpaId(cpaId)
+                .partyId(clientOin)
+                .action(header.getAction())
+                .result("SUCCESS")
+                .build());
+
+            // 8. Update status naar PROCESSING
+            trackingService.markProcessing(messageId);
+
+            // 9. Construeer en retourneer SOAP ACK (alleen bij rm-profielen)
+            boolean needsAck = header.getAckRequested() != null;
+            if (needsAck) {
+                return soapHelper.createAck(header);
+            }
+            return soapHelper.createEmptyResponse();
+
+        } catch (DuplicateMessageException e) {
+            // Al afgehandeld door persistDuplicate() (audit gepubliceerd) - origineel bericht
+            // blijft ongewijzigd, geen FAILED-rij nodig.
+            throw e;
+        } catch (EbmsException e) {
+            log.error("[INBOUND] Afgewezen: messageId={} code={} reden={}",
+                messageId, e.getErrorCode(), e.getMessage());
+            trackingService.persistFailed(header, rawSoap, clientOin, e.getMessage());
             publishAudit(AuditEvent.builder()
                 .eventType("MESSAGE_REJECTED")
                 .messageId(messageId)
                 .cpaId(cpaId)
                 .partyId(clientOin)
                 .result("FAILURE")
-                .errorDetail(cpaResult.getErrorMessage())
+                .errorDetail(e.getMessage())
                 .build());
-            throw new EbmsException("CPA_VALIDATION_FAILED", cpaResult.getErrorMessage());
+            throw e;
+        } catch (Exception e) {
+            log.error("[INBOUND] Onverwachte fout: messageId={}", messageId, e);
+            trackingService.persistFailed(header, rawSoap, clientOin,
+                e.getClass().getSimpleName() + ": " + (e.getMessage() != null ? e.getMessage() : "<geen detail>"));
+            publishAudit(AuditEvent.builder()
+                .eventType("MESSAGE_REJECTED")
+                .messageId(messageId)
+                .cpaId(cpaId)
+                .partyId(clientOin)
+                .result("FAILURE")
+                .errorDetail(e.getMessage())
+                .build());
+            throw e;
         }
-
-        // 2. Inbound decryptie (Digikoppeling osb-*-e profielen: decrypt dan verify)
-        String processedSoap = rawSoap;
-        if (soapHelper.hasEncryptedBody(request)) {
-            log.info("[INBOUND] Versleuteld bericht ontvangen – ontsleutelen: messageId={}", messageId);
-            processedSoap = cryptoServiceClient.decrypt(rawSoap, decryptionKeyAlias, messageId);
-            log.info("[INBOUND] Ontsleuteling geslaagd: messageId={}", messageId);
-        }
-
-        // 3. Inbound handtekeningverificatie (Digikoppeling osb-*-s profielen)
-        if (soapHelper.hasSignature(request)) {
-            log.info("[INBOUND] Ondertekend bericht – verificatie: messageId={}", messageId);
-            cryptoServiceClient.verify(processedSoap, messageId);
-            log.info("[INBOUND] Handtekening geverifieerd: messageId={}", messageId);
-        }
-
-        // 4. Duplicate suppression
-        if (messageRepository.existsByMessageId(messageId)) {
-            log.warn("[DUPLICATE] messageId={}", messageId);
-            persistDuplicate(messageId, header);
-            throw new DuplicateMessageException(messageId);
-        }
-
-        // 5. Persisteer in database
-        EbmsMessageEntity entity = buildEntity(header, processedSoap, clientOin);
-        entity = messageRepository.save(entity);
-
-        // 6. Publiceer op AMQP inbound queue
-        EbmsInboundMessage amqpMsg = EbmsInboundMessage.builder()
-            .messageId(messageId)
-            .conversationId(conversationId)
-            .header(header)
-            .rawSoapXml(processedSoap)
-            .receivedAt(Instant.now())
-            .build();
-        rabbitTemplate.convertAndSend(
-            RabbitMqConfig.EXCHANGE_EBMS,
-            RabbitMqConfig.ROUTING_INBOUND,
-            amqpMsg);
-
-        // 7. Publiceer audit-event
-        publishAudit(AuditEvent.builder()
-            .eventType("MESSAGE_RECEIVED")
-            .messageId(messageId)
-            .conversationId(conversationId)
-            .cpaId(cpaId)
-            .partyId(clientOin)
-            .action(header.getAction())
-            .result("SUCCESS")
-            .build());
-
-        // 8. Update status naar PROCESSING
-        entity.setStatus(MessageStatus.PROCESSING);
-        messageRepository.save(entity);
-
-        // 9. Construeer en retourneer SOAP ACK (alleen bij rm-profielen)
-        boolean needsAck = header.getAckRequested() != null;
-        if (needsAck) {
-            return soapHelper.createAck(header);
-        }
-        return soapHelper.createEmptyResponse();
     }
 
     // ── Scheduled taken ───────────────────────────────────────────────────
@@ -340,14 +362,13 @@ public class OrchestratorService {
      * @throws EbmsException met errorCode {@code SecurityFailure} bij een mismatch of
      *                        ontbrekende header (indien enforced)
      */
-    private void validateInboundOin(EbxmlMessageHeader header, String clientOin,
-                                     String messageId, String cpaId, String rawSoap) {
+    private void validateInboundOin(EbxmlMessageHeader header, String clientOin, String messageId) {
         String fromPartyId = header.getFrom() != null && !header.getFrom().isEmpty()
             ? header.getFrom().get(0).getValue() : null;
 
         if (clientOin == null || clientOin.isBlank()) {
             if (enforceInboundOinValidation) {
-                rejectSecurityFailure(header, messageId, cpaId, clientOin, rawSoap,
+                rejectSecurityFailure(messageId,
                     "X-Forwarded-Client-OIN header ontbreekt (verplicht conform "
                         + "ebms.security.enforce-inbound-oin-validation=true)");
             } else {
@@ -358,63 +379,21 @@ public class OrchestratorService {
         }
 
         if (fromPartyId == null || !clientOin.equals(fromPartyId)) {
-            rejectSecurityFailure(header, messageId, cpaId, clientOin, rawSoap,
+            rejectSecurityFailure(messageId,
                 "Gateway-geverifieerd OIN (" + clientOin + ") komt niet overeen met eb:From/PartyId ("
                     + fromPartyId + ") - mogelijke identiteitspoofing");
         }
     }
 
     /**
-     * Persisteert het bericht als {@code FAILED} (indien nog niet aanwezig), publiceert een
-     * {@code MESSAGE_REJECTED} audit-event en gooit een {@link EbmsException} met errorCode
-     * {@code SecurityFailure}, die door {@code EbmsMessageProvider} vertaald wordt naar een
-     * ebXML SOAP Fault.
+     * Gooit een {@link EbmsException} met errorCode {@code SecurityFailure}, die door
+     * {@code EbmsMessageProvider} vertaald wordt naar een ebXML SOAP Fault. Persistentie
+     * (FAILED-rij) en audit-publicatie gebeuren centraal in de catch-blokken van
+     * {@code processInboundMessage()}.
      */
-    private void rejectSecurityFailure(EbxmlMessageHeader header, String messageId, String cpaId,
-                                        String clientOin, String rawSoap, String reason) {
+    private void rejectSecurityFailure(String messageId, String reason) {
         log.error("[OIN-ANTISPOOF] Bericht afgewezen: messageId={} reden={}", messageId, reason);
-
-        if (!messageRepository.existsByMessageId(messageId)) {
-            EbmsMessageEntity failedEntity = buildEntity(header, rawSoap, clientOin);
-            failedEntity.setStatus(MessageStatus.FAILED);
-            failedEntity.setErrorMessage(reason);
-            messageRepository.save(failedEntity);
-        }
-
-        publishAudit(AuditEvent.builder()
-            .eventType("MESSAGE_REJECTED")
-            .messageId(messageId)
-            .cpaId(cpaId)
-            .partyId(clientOin)
-            .result("FAILURE")
-            .errorDetail(reason)
-            .build());
-
         throw new EbmsException("SecurityFailure", reason);
-    }
-
-    private EbmsMessageEntity buildEntity(EbxmlMessageHeader header,
-                                           String rawSoap,
-                                           String clientOin) {
-        return EbmsMessageEntity.builder()
-            .messageId(header.getMessageInfo().getMessageId())
-            .refToMessageId(header.getMessageInfo().getRefToMessageId())
-            .conversationId(header.getConversationId())
-            .cpaId(header.getCpaId())
-            .fromPartyId(header.getFrom().isEmpty() ? clientOin : header.getFrom().get(0).getValue())
-            .fromPartyType(header.getFrom().isEmpty() ? null : header.getFrom().get(0).getType())
-            .fromRole(header.getFromRole())
-            .toPartyId(header.getTo().isEmpty() ? null : header.getTo().get(0).getValue())
-            .toPartyType(header.getTo().isEmpty() ? null : header.getTo().get(0).getType())
-            .toRole(header.getToRole())
-            .service(header.getService().getValue())
-            .action(header.getAction())
-            .direction(MessageDirection.INBOUND)
-            .status(MessageStatus.RECEIVED)
-            .timestamp(header.getMessageInfo().getTimestamp())
-            .ackRequested(header.getAckRequested() != null)
-            .rawSoapXml(rawSoap)
-            .build();
     }
 
     private void persistDuplicate(String messageId, EbxmlMessageHeader header) {

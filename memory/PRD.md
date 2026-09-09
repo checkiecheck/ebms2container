@@ -683,6 +683,20 @@ INBOUND bericht dat vastzat op PROCESSING liep elke ~10 minuten in een eindeloze
   antispoofing, CPA-validatie, decryptie, handtekeningverificatie, duplicate-check — vóór persist,
   dus ook afgewezen/security-verdachte inbound-berichten laten momenteel geen spoor achter).
 
+- **Fase 2 (inbound) – voltooid & unit-getest (september 2026):** zelfde patroon toegepast op
+  `OrchestratorService.processInboundMessage()`. Nieuwe `InboundMessageTrackingService`
+  (`persistReceived`/`markProcessing`/`persistFailed`, elk `REQUIRES_NEW`). `processInboundMessage()`
+  niet meer `@Transactional`, try/catch met `DuplicateMessageException` eerst (geen dubbele
+  FAILED-persist bij duplicaten), dan `EbmsException`/generieke `Exception` → beide roepen
+  `persistFailed()` + `MESSAGE_REJECTED`-audit aan vóór het opnieuw gooien. `validateInboundOin`/
+  `rejectSecurityFailure` vereenvoudigd (loggen+gooien, geen inline persist/audit meer — dat was
+  toch al nutteloos want zat in dezelfde transactie die werd teruggerold).
+  **Testing_agent:** 34/34 unit tests groen (Mockito). Docker/Testcontainers niet beschikbaar in
+  sandbox (zelfde beperking als Fase 1) → `InboundPipelineIntegrationTest` (9 scenario's, incl. 2
+  herschreven tests die nu een FAILED-rij met `errorMessage` verwachten i.p.v. "geen rij")
+  compileert schoon maar niet end-to-end gedraaid. Gebruiker test dit zelf, zoals bij Fase 1.
+  **Beide fases (outbound + inbound) nu klaar.**
+
 ### P0 – Fase 4: auditor-service (GEPARKEERD IN BACKLOG)
 - **Discussie (augustus 2026):** gebruiker wil niet noodzakelijk een eigen microservice bouwen
   om `ebms.audit.events` (queue bestaat al, zie `RabbitMqConfig.QUEUE_AUDIT`, gepubliceerd door

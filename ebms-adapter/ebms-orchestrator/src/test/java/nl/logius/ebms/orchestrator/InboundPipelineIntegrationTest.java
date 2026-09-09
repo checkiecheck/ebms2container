@@ -279,8 +279,8 @@ class InboundPipelineIntegrationTest {
     // ═══════════════════════════════════════════════════════════════════════════
 
     @Test
-    @DisplayName("Ongeldige handtekening: XmlSecurityException gegooid, bericht NIET opgeslagen in DB")
-    void processInboundMessage_invalidSignature_throwsExceptionWithoutPersistence() throws Exception {
+    @DisplayName("Ongeldige handtekening: XmlSecurityException gegooid, bericht opgeslagen als FAILED (zichtbaar in ebms_message/UI)")
+    void processInboundMessage_invalidSignature_persistsAsFailed() throws Exception {
         String signedSoap = buildSoapXml("msg-badsig-001", true, false, false);
 
         when(cryptoServiceClient.verify(any(), any()))
@@ -294,8 +294,11 @@ class InboundPipelineIntegrationTest {
             .isInstanceOf(XmlSecurityException.class)
             .hasMessageContaining("Handtekening ongeldig");
 
-        // Geen DB-opslag na verificatiefout
-        assertThat(messageRepository.existsByMessageId("msg-badsig-001")).isFalse();
+        // Bericht MOET zichtbaar zijn als FAILED (regressie-fix: voorheen spoorloos verdwenen
+        // door de @Transactional-rollback die ook de PROCESSING-rij terugdraaide).
+        EbmsMessageEntity failed = messageRepository.findByMessageId("msg-badsig-001").orElseThrow();
+        assertThat(failed.getStatus()).isEqualTo(MessageStatus.FAILED);
+        assertThat(failed.getErrorMessage()).contains("Handtekening ongeldig");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -322,8 +325,8 @@ class InboundPipelineIntegrationTest {
     // ═══════════════════════════════════════════════════════════════════════════
 
     @Test
-    @DisplayName("CPA-validatie mislukt: EbmsException gegooid, geen DB-opslag, geen crypto")
-    void processInboundMessage_cpaValidationFails_throwsEbmsExceptionWithoutCrypto() throws Exception {
+    @DisplayName("CPA-validatie mislukt: EbmsException gegooid, bericht opgeslagen als FAILED, geen crypto")
+    void processInboundMessage_cpaValidationFails_persistsAsFailedWithoutCrypto() throws Exception {
         when(cpaValidationService.validateCpaAndOin(any(), any()))
             .thenReturn(CpaValidationResult.failure("CPA niet gevonden: urn:onbekend:cpa"));
 
@@ -335,7 +338,11 @@ class InboundPipelineIntegrationTest {
             .isInstanceOf(nl.logius.ebms.common.exception.EbmsException.class);
 
         verifyNoInteractions(cryptoServiceClient);
-        assertThat(messageRepository.existsByMessageId("msg-cpablock-001")).isFalse();
+
+        // Bericht MOET zichtbaar zijn als FAILED (regressie-fix, zie test hierboven).
+        EbmsMessageEntity failed = messageRepository.findByMessageId("msg-cpablock-001").orElseThrow();
+        assertThat(failed.getStatus()).isEqualTo(MessageStatus.FAILED);
+        assertThat(failed.getErrorMessage()).contains("CPA niet gevonden");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
