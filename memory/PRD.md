@@ -631,6 +631,28 @@ INBOUND bericht dat vastzat op PROCESSING liep elke ~10 minuten in een eindeloze
   ebXML CPPA aanwezig; als een echte CPA een jaar/maand-ISO-duur (`P1Y`) gebruikt i.p.v.
   seconden-schaal, blijft dat veld `null` (buiten scope, CPPA verwacht seconden-schaal).
 
+### P1 – Outbound messageId-robuustheid + poison-pill loop bij ontbrekend messageId (GEPARKEERD IN BACKLOG)
+- **Gevonden (september 2026, via een e2e-testscript van gebruiker):** `EbmsOutboundMessage.messageId`
+  (top-level AMQP-veld, gebruikt door `OutboundMessageService`/`CryptoServiceClient` voor
+  logging/idempotency/audit) is een ANDER veld dan `header.messageInfo.messageId` (het echte
+  ebXML-envelope MessageId). Een producer die alleen de genestelde `header.messageInfo.messageId`
+  vult (logisch, dat is de correcte ebXML-plek) laat het top-level veld `null` → crasht met een
+  `NullPointerException` in `CryptoServiceClient.sign()` (`Map.of()` accepteert geen null-waarden)
+  → misleidende foutmelding `"crypto-service onbereikbaar: null"` (was nooit een netwerkfout, de
+  call kwam er nooit; DNS/TCP-connectiviteit naar crypto-service is bevestigd gezond).
+- **Extra gevonden: infinite-retry-loop.** `XmlSecurityException` krijgt altijd errorcode
+  `SecurityFailure`, die niet in `NON_RETRYABLE_ERROR_CODES` staat → `nack(requeue=true)` →
+  RabbitMQ herlevert onmiddellijk (sub-second tight loop in de logs) een bericht dat sowieso nooit
+  kan slagen (structurele datafout, geen tijdelijke crypto-service-uitval).
+- **Akkoord (geparkeerd, nog niet gebouwd):** optie A — `OutboundMessageService` valt terug op
+  `header.getMessageInfo().getMessageId()` als het top-level `messageId` ontbreekt, zodat
+  producenten het niet dubbel hoeven aan te leveren. (Optie B – vroege validatie/nack-zonder-
+  requeue bij écht beide ontbrekend – nog niet definitief gekozen, apart te bespreken.)
+- **Los aandachtspunt, niet backlog-item maar noteren:** testscript van gebruiker gebruikte ook een
+  top-level `payload`-key (ruwe XML-string) — `EbmsOutboundMessage` heeft geen `payload`-veld,
+  alleen `payloadRef`/`payloadContentType`. Wordt nu stilletjes genegeerd door Jackson. Gebruiker
+  fixt eigen testscript eerst.
+
 ### P0 – Fase 4: auditor-service (GEPARKEERD IN BACKLOG)
 - **Discussie (augustus 2026):** gebruiker wil niet noodzakelijk een eigen microservice bouwen
   om `ebms.audit.events` (queue bestaat al, zie `RabbitMqConfig.QUEUE_AUDIT`, gepubliceerd door
