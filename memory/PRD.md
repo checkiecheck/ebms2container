@@ -697,6 +697,31 @@ INBOUND bericht dat vastzat op PROCESSING liep elke ~10 minuten in een eindeloze
   compileert schoon maar niet end-to-end gedraaid. Gebruiker test dit zelf, zoals bij Fase 1.
   **Beide fases (outbound + inbound) nu klaar.**
 
+### Kritieke bugfix: CXF wees élk echt inkomend SOAP-bericht af (MustUnderstand) – september 2026
+- **Root cause:** CXF's ingebouwde `MustUnderstandEndingInterceptor` wijst een inkomend SOAP-
+  bericht af als een header met `mustUnderstand="1"` door GEEN enkele geregistreerde interceptor
+  als "begrepen" is gedeclareerd (via `getUnderstoodHeaders()`). `SoapHelper` zet dit attribuut op
+  4 ebXML-headers (`MessageHeader`/`AckRequested`/`Acknowledgment`/`ErrorList`), maar niets
+  declareerde dit richting CXF → **100% van echte inbound SOAP-traffic werd afgewezen**, nog
+  vóórdat `EbmsMessageProvider.invoke()` (en daarmee alle CPA/OIN/crypto-logica) ooit werd
+  aangeroepen. Gevonden via gebruikers eigen K8s-cluster (eerste échte HTTP-round-trip test ooit
+  tegen dit endpoint — alle bestaande tests riepen `processInboundMessage()` rechtstreeks aan,
+  wat de CXF-interceptorchain volledig omzeilt).
+- [x] Nieuwe `EbxmlMustUnderstandInterceptor` (`AbstractSoapInterceptor`, `Phase.READ`,
+  no-op `handleMessage`/`handleFault`) declareert 10 QNames in namespace
+  `msg-header-2_0.xsd`: de 4 die we zelf versturen + 6 defensieve (OASIS ebMS v2.0: `SyncReply`,
+  `TraceHeaderList`, `Via`, `MessageOrder`, `StatusRequest`, `StatusResponse`) die we zelf niet
+  genereren maar een spec-conform partnersysteem wel kan meesturen. Geregistreerd op het `/ebms`-
+  endpoint in `CxfEndpointConfig`, naast `RawPayloadCaptureInterceptor`.
+- **Testing_agent verificatie (geslaagd, 35/35):** eerste échte over-the-wire HTTP/SOAP-test in
+  deze repo — CXF Jetty-endpoint op random poort, raw SOAP via `HttpClient`. Reproduceert de bug
+  zonder interceptor (exacte `SoapFault` uit de K8s-logs, `Provider.invoke()` nooit bereikt) én
+  bevestigt de fix mét interceptor (`MessageHeader` alleen, en `MessageHeader`+`AckRequested`
+  samen) — `Provider.invoke()` wordt nu bereikt.
+- **Niet meegenomen (bewust, gebruiker akkoord):** WARN `"CXF HTTPConduit niet beschikbaar –
+  fallback timeout: not a proxy instance"` in `OutboundSoapClient` — niet-kritiek, apart op te
+  pakken indien gewenst.
+
 ### P0 – Fase 4: auditor-service (GEPARKEERD IN BACKLOG)
 - **Discussie (augustus 2026):** gebruiker wil niet noodzakelijk een eigen microservice bouwen
   om `ebms.audit.events` (queue bestaat al, zie `RabbitMqConfig.QUEUE_AUDIT`, gepubliceerd door

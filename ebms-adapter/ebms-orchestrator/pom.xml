@@ -121,6 +121,18 @@
             <artifactId>awaitility</artifactId>
             <scope>test</scope>
         </dependency>
+
+        <!-- ── CXF Jetty HTTP transport – ALLEEN voor test scope, geeft een
+             standalone HTTPDestinationFactory zodat we CXF endpoints in
+             unit-tests op een localhost-poort kunnen publiceren (buiten de
+             servlet-container om) om de CXF-interceptorketen echt over HTTP
+             te valideren. Wordt NIET meegenomen in productie-artefacten. -->
+        <dependency>
+            <groupId>org.apache.cxf</groupId>
+            <artifactId>cxf-rt-transports-http-jetty</artifactId>
+            <version>${cxf.version}</version>
+            <scope>test</scope>
+        </dependency>
 <dependency>
     <groupId>com.sun.xml.messaging.saaj</groupId>
     <artifactId>saaj-impl</artifactId>
