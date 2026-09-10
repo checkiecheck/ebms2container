@@ -379,7 +379,7 @@
       const cpaId = getLenientAttribute(root, 'cpaId') || '(onbekend)';
 
       const statusEl = doc.getElementsByTagNameNS('*', 'Status')[0];
-      const status = statusEl ? (statusEl.getAttribute('value') || statusEl.textContent.trim()) : 'onbekend';
+      const status = statusEl ? (getLenientAttribute(statusEl, 'value') || statusEl.textContent.trim()) : 'onbekend';
 
       const startEl = doc.getElementsByTagNameNS('*', 'Start')[0];
       const endEl   = doc.getElementsByTagNameNS('*', 'End')[0];
@@ -391,10 +391,10 @@
         const name = getLenientAttribute(p, 'partyName') || '(onbekende partij)';
         const partyIdEl = p.getElementsByTagNameNS('*', 'PartyId')[0];
         const oin = partyIdEl ? partyIdEl.textContent.trim() : '(geen OIN)';
-        const oinType = partyIdEl ? (partyIdEl.getAttribute('type') || '') : '';
+        const oinType = partyIdEl ? (getLenientAttribute(partyIdEl, 'type') || '') : '';
         const endpointEl = p.getElementsByTagNameNS('*', 'Endpoint')[0];
         const endpoint = endpointEl
-          ? (endpointEl.getAttribute('uri') || endpointEl.textContent.trim())
+          ? (getLenientAttribute(endpointEl, 'uri') || endpointEl.textContent.trim())
           : null;
         const hasCertificate =
           p.getElementsByTagNameNS('*', 'Certificate').length > 0 ||

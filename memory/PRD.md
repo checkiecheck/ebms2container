@@ -793,6 +793,15 @@ INBOUND bericht dat vastzat op PROCESSING liep elke ~10 minuten in een eindeloze
 - **Gebruikerskeuze (september 2026):** Duplicaat-metriek (Micrometer-counter voor IN/OUT
   messageId-botsing) expliciet AFGEWEZEN. Van de backlog verwijderd.
 
+### Bugfix: Status@value/PartyId@type/Endpoint@uri niet namespace-agnostisch (voltooid – september 2026)
+- Zelfde bugpatroon als de eerdere `partyName`/`cpaId`-fix: `statusEl.getAttribute('value')`,
+  `partyIdEl.getAttribute('type')` en `endpointEl.getAttribute('uri')` zochten de attribuutnaam
+  letterlijk zonder prefix — leverde `null`/leeg op bij een geprefixed CPA-document
+  (bv. `tp:value`, `tp:type`, `tp:uri`).
+- [x] Alle 3 hergebruiken nu de bestaande `getLenientAttribute()`-helper (geen nieuwe logica).
+- **Zelf getest:** JS-syntax gevalideerd via `node --check` op het geëxtraheerde script-blok — OK.
+  Geen live browsertest mogelijk (geen draaiende Java-service in deze sandbox, bekende restrictie).
+
 ### P0 – Fase 4: auditor-service (GEPARKEERD IN BACKLOG)
 - **Discussie (augustus 2026):** gebruiker wil niet noodzakelijk een eigen microservice bouwen
   om `ebms.audit.events` (queue bestaat al, zie `RabbitMqConfig.QUEUE_AUDIT`, gepubliceerd door
