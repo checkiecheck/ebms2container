@@ -34,6 +34,10 @@ public interface EbmsMessageRepository extends JpaRepository<EbmsMessageEntity, 
     /** Zoek het originele bericht op status, gebruikt voor ACK-afhandeling. */
     Optional<EbmsMessageEntity> findByMessageIdAndStatus(String messageId, MessageStatus status);
 
+    /** Zoek uitsluitend een uitgaand bericht in de verwachte SENT-status voor ACK-afhandeling. */
+    Optional<EbmsMessageEntity> findByMessageIdAndDirectionAndStatus(
+      String messageId, MessageDirection direction, MessageStatus status);
+
     List<EbmsMessageEntity> findByConversationId(String conversationId);
 
     List<EbmsMessageEntity> findByStatus(MessageStatus status);

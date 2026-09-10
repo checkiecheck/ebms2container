@@ -2,11 +2,16 @@ package nl.logius.ebms.orchestrator.service;
 
 import jakarta.xml.soap.SOAPMessage;
 import nl.logius.ebms.common.model.cpa.DeliveryChannelDto;
+import nl.logius.ebms.common.model.cpa.PartnerCertificateDto;
 import nl.logius.ebms.common.model.ebxml.AckRequested;
 import nl.logius.ebms.common.model.ebxml.EbxmlMessageHeader;
 import nl.logius.ebms.common.model.ebxml.MessageInfo;
 import nl.logius.ebms.common.model.ebxml.PartyId;
 import nl.logius.ebms.common.model.ebxml.ServiceType;
+import nl.logius.ebms.common.exception.XmlSecurityException;
+import nl.logius.ebms.orchestrator.entity.EbmsMessageEntity;
+import nl.logius.ebms.orchestrator.entity.MessageDirection;
+import nl.logius.ebms.orchestrator.entity.MessageStatus;
 import nl.logius.ebms.orchestrator.repository.EbmsMessageRepository;
 import nl.logius.ebms.orchestrator.soap.SoapHelper;
 import org.junit.jupiter.api.BeforeEach;
@@ -32,7 +37,11 @@ import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.doThrow;
+
+import java.util.Optional;
 
 /**
  * Mockito-only unit tests voor de nieuwe iteration_30 Reliable Messaging-response-tak in
@@ -286,5 +295,61 @@ class OrchestratorServiceReliableMessagingResponseTest {
             eq(nl.logius.ebms.orchestrator.config.RabbitMqConfig.EXCHANGE_EBMS),
             eq(nl.logius.ebms.orchestrator.config.RabbitMqConfig.ROUTING_INBOUND),
             (Object) any());
+    }
+
+    @Test
+    @DisplayName("Geldige gesigneerde ACK -> outbound SENT wordt DELIVERED")
+    void signedAcknowledgment_validSignature_transitionsOutboundToDelivered() {
+        EbmsMessageEntity outbound = mock(EbmsMessageEntity.class);
+        PartnerCertificateDto certificate = PartnerCertificateDto.builder()
+            .cpaId(CPA_ID).partyId(FROM_OIN).certificatePem("CERT-PEM").build();
+        when(messageRepository.findByMessageIdAndDirectionAndStatus(
+            MESSAGE_ID, MessageDirection.OUTBOUND, MessageStatus.SENT))
+            .thenReturn(Optional.of(outbound));
+        when(cpaValidationService.getPartnerCertificates(CPA_ID, FROM_OIN))
+            .thenReturn(List.of(certificate));
+
+        service.handleAcknowledgment(MESSAGE_ID, "<signed-ack/>", "ack-msg-1", true, CPA_ID, FROM_OIN);
+
+        verify(cryptoServiceClient).verify("<signed-ack/>", "ack-msg-1", "CERT-PEM");
+        verify(outbound).setStatus(MessageStatus.DELIVERED);
+        verify(messageRepository).save(outbound);
+    }
+
+    @Test
+    @DisplayName("Ongeldige gesigneerde ACK -> outbound blijft SENT")
+    void signedAcknowledgment_invalidSignature_doesNotTransition() {
+        EbmsMessageEntity outbound = mock(EbmsMessageEntity.class);
+        PartnerCertificateDto certificate = PartnerCertificateDto.builder()
+            .cpaId(CPA_ID).partyId(FROM_OIN).certificatePem("CERT-PEM").build();
+        when(messageRepository.findByMessageIdAndDirectionAndStatus(
+            MESSAGE_ID, MessageDirection.OUTBOUND, MessageStatus.SENT))
+            .thenReturn(Optional.of(outbound));
+        when(cpaValidationService.getPartnerCertificates(CPA_ID, FROM_OIN))
+            .thenReturn(List.of(certificate));
+        doThrow(new XmlSecurityException("ACK-handtekening ongeldig"))
+            .when(cryptoServiceClient).verify("<invalid-ack/>", "ack-msg-2", "CERT-PEM");
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+            service.handleAcknowledgment(MESSAGE_ID, "<invalid-ack/>", "ack-msg-2", true, CPA_ID, FROM_OIN))
+            .isInstanceOf(XmlSecurityException.class);
+
+        verify(outbound, never()).setStatus(MessageStatus.DELIVERED);
+        verify(messageRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("Onbekende RefToMessageId -> geen exception en geen statusmutatie")
+    void acknowledgment_unknownReference_isIgnoredCleanly() {
+        when(messageRepository.findByMessageIdAndDirectionAndStatus(
+            "unknown-ref", MessageDirection.OUTBOUND, MessageStatus.SENT))
+            .thenReturn(Optional.empty());
+
+        org.assertj.core.api.Assertions.assertThatCode(() ->
+            service.handleAcknowledgment("unknown-ref", "<ack/>", "ack-msg-3", true))
+            .doesNotThrowAnyException();
+
+        verifyNoInteractions(cryptoServiceClient);
+        verify(messageRepository, never()).save(any());
     }
 }

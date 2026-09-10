@@ -27,6 +27,7 @@ import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.PrivateKey;
 import java.security.PublicKey;
+import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 
 /**
@@ -159,6 +160,11 @@ public class XmlSigningService {
      * @throws XmlSecurityException bij een verwerkingsfout
      */
     public boolean verify(String signedXml, String messageId) {
+        return verify(signedXml, messageId, null);
+    }
+
+    /** Verifieert met het expliciet door CPA geleverde partnercertificaat wanneer aanwezig. */
+    public boolean verify(String signedXml, String messageId, String certificatePem) {
         long startMs = System.currentTimeMillis();
         try {
             Document doc = parseXml(signedXml);
@@ -173,18 +179,25 @@ public class XmlSigningService {
             Element signatureElement = (Element) signatures.item(0);
             XMLSignature signature   = new XMLSignature(signatureElement, "");
 
-            // Haal publieke sleutel op uit KeyInfo in het document
+            // Gebruik bij ACK's het door de CPA geleverde certificaat; KeyInfo is fallback
+            // voor bestaande inkomende businessberichten zonder CPA-certificaatparameter.
             boolean valid = false;
-            org.apache.xml.security.keys.KeyInfo ki = signature.getKeyInfo();
-            if (ki != null) {
-                X509Certificate cert = ki.getX509Certificate();
-                if (cert != null) {
-                    valid = signature.checkSignatureValue(cert);
-                    log.debug("[XML-VERIFY] Certificaat: subject={}", cert.getSubjectX500Principal());
-                } else {
-                    PublicKey pk = ki.getPublicKey();
-                    if (pk != null) {
-                        valid = signature.checkSignatureValue(pk);
+            if (certificatePem != null && !certificatePem.isBlank()) {
+                CertificateFactory factory = CertificateFactory.getInstance("X.509");
+                X509Certificate cert = (X509Certificate) factory.generateCertificate(
+                    new ByteArrayInputStream(certificatePem.getBytes(StandardCharsets.UTF_8)));
+                valid = signature.checkSignatureValue(cert);
+                log.debug("[XML-VERIFY] CPA-certificaat: subject={}", cert.getSubjectX500Principal());
+            } else {
+                org.apache.xml.security.keys.KeyInfo ki = signature.getKeyInfo();
+                if (ki != null) {
+                    X509Certificate cert = ki.getX509Certificate();
+                    if (cert != null) {
+                        valid = signature.checkSignatureValue(cert);
+                        log.debug("[XML-VERIFY] Certificaat uit KeyInfo: subject={}", cert.getSubjectX500Principal());
+                    } else {
+                        PublicKey pk = ki.getPublicKey();
+                        if (pk != null) valid = signature.checkSignatureValue(pk);
                     }
                 }
             }

@@ -86,13 +86,21 @@ public class CryptoServiceClient {
      * @throws XmlSecurityException bij een ongeldige handtekening of servicefout
      */
     public boolean verify(String signedXml, String messageId) {
+        return verify(signedXml, messageId, null);
+    }
+
+    public boolean verify(String signedXml, String messageId, String certificatePem) {
         log.debug("[CRYPTO] Verificatie: messageId={}", messageId);
         try {
+            Map<String, String> request = new java.util.HashMap<>();
+            request.put("signedXml", signedXml);
+            request.put("messageId", messageId);
+            if (certificatePem != null && !certificatePem.isBlank()) {
+                request.put("certificatePem", certificatePem);
+            }
             ResponseEntity<VerifyResponse> response = cryptoRestClient.post()
                 .uri("/api/crypto/verify")
-                .body(Map.of(
-                    "signedXml", signedXml,
-                    "messageId", messageId))
+                .body(request)
                 .retrieve()
                 .toEntity(VerifyResponse.class);
 

@@ -21,4 +21,7 @@ public class VerifyRequest {
 
     /** Optioneel bericht-ID voor audit-logging. */
     private String messageId;
+
+    /** Optioneel CPA-partnercertificaat waarmee de handtekening moet worden gevalideerd. */
+    private String certificatePem;
 }

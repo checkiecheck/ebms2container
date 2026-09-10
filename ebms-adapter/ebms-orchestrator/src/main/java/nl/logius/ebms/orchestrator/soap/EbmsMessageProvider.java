@@ -69,8 +69,13 @@ public class EbmsMessageProvider implements Provider<SOAPMessage> {
             // ebMS2 Acknowledgment (inkomende ACK op een rm-bericht dat wij stuurden)
             if (soapHelper.isAcknowledgment(soapHeader)) {
                 String refToMessageId = soapHelper.parseRefToMessageId(soapHeader);
+                String rawSoap = extractRawXmlPayload(request);
+                boolean signed = soapHelper.hasSignature(request);
+                String ackMessageId = header.getMessageInfo().getMessageId();
+                String fromPartyId = header.getFrom().isEmpty() ? null : header.getFrom().get(0).getValue();
                 log.info("[ACK] ontvangen: refToMessageId={} van OIN={}", refToMessageId, clientOin);
-                return orchestratorService.handleAcknowledgment(refToMessageId);
+                return orchestratorService.handleAcknowledgment(
+                    refToMessageId, rawSoap, ackMessageId, signed, header.getCpaId(), fromPartyId);
             }
 
             // Reguliere ebMS2-berichtverwerking

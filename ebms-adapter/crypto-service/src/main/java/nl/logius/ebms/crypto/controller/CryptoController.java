@@ -70,7 +70,8 @@ public class CryptoController {
     public ResponseEntity<VerifyResponse> verify(@Valid @RequestBody VerifyRequest request) {
         boolean valid = xmlSigningService.verify(
             request.getSignedXml(),
-            request.getMessageId());
+            request.getMessageId(),
+            request.getCertificatePem());
 
         return ResponseEntity.ok(VerifyResponse.builder()
             .valid(valid)

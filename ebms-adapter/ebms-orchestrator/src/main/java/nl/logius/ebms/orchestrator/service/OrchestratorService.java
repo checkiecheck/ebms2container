@@ -10,6 +10,7 @@ import nl.logius.ebms.common.model.amqp.EbmsInboundMessage;
 import nl.logius.ebms.common.model.amqp.EbmsAckEvent;
 import nl.logius.ebms.common.model.amqp.EbmsOutboundMessage;
 import nl.logius.ebms.common.model.cpa.DeliveryChannelDto;
+import nl.logius.ebms.common.model.cpa.PartnerCertificateDto;
 import nl.logius.ebms.common.model.ebxml.AckRequested;
 import nl.logius.ebms.common.model.ebxml.EbxmlMessageHeader;
 import nl.logius.ebms.common.model.ebxml.EbxmlProfile;
@@ -19,6 +20,7 @@ import nl.logius.ebms.common.model.ebxml.ServiceType;
 import nl.logius.ebms.orchestrator.config.RabbitMqConfig;
 import nl.logius.ebms.orchestrator.config.RetryProperties;
 import nl.logius.ebms.orchestrator.entity.EbmsMessageEntity;
+import nl.logius.ebms.orchestrator.entity.MessageDirection;
 import nl.logius.ebms.orchestrator.entity.MessageStatus;
 import nl.logius.ebms.orchestrator.repository.EbmsMessageRepository;
 import nl.logius.ebms.orchestrator.soap.SoapHelper;
@@ -297,10 +299,43 @@ public class OrchestratorService {
      */
     @Transactional
     public SOAPMessage handleAcknowledgment(String refToMessageId) {
+        return handleAcknowledgment(refToMessageId, null, null, false);
+    }
+
+    /**
+     * Verwerkt een inkomende ACK en valideert een aanwezige XML-DSig voordat het outbound
+     * bericht als DELIVERED wordt gemarkeerd.
+     */
+    @Transactional
+    public SOAPMessage handleAcknowledgment(String refToMessageId, String rawSoap,
+                                             String ackMessageId, boolean signaturePresent) {
+        return handleAcknowledgment(refToMessageId, rawSoap, ackMessageId, signaturePresent, null, null);
+    }
+
+    @Transactional
+    public SOAPMessage handleAcknowledgment(String refToMessageId, String rawSoap,
+                                             String ackMessageId, boolean signaturePresent,
+                                             String cpaId, String fromPartyId) {
         log.info("[ACK] Acknowledgment ontvangen voor messageId={}", refToMessageId);
 
-        messageRepository.findByMessageIdAndStatus(refToMessageId, MessageStatus.SENT)
+        if (refToMessageId == null || refToMessageId.isBlank()) {
+            log.warn("[ACK] Geen RefToMessageId ontvangen");
+            return soapHelper.createEmptyResponse();
+        }
+
+        messageRepository.findByMessageIdAndDirectionAndStatus(
+                refToMessageId, MessageDirection.OUTBOUND, MessageStatus.SENT)
             .ifPresentOrElse(entity -> {
+                if (signaturePresent) {
+                    String verificationMessageId = ackMessageId != null ? ackMessageId : refToMessageId;
+                    if (cpaId != null && fromPartyId != null) {
+                        String certificatePem = resolveAckCertificate(cpaId, fromPartyId);
+                        cryptoServiceClient.verify(rawSoap, verificationMessageId, certificatePem);
+                    } else {
+                        cryptoServiceClient.verify(rawSoap, verificationMessageId);
+                    }
+                    log.info("[ACK] XML-DSig geverifieerd: refToMessageId={}", refToMessageId);
+                }
                 entity.setStatus(MessageStatus.DELIVERED);
                 messageRepository.save(entity);
                 log.info("[ACK] Bericht {} bijgewerkt naar DELIVERED", refToMessageId);
@@ -336,6 +371,22 @@ public class OrchestratorService {
             });
 
         return soapHelper.createEmptyResponse();
+    }
+
+    private String resolveAckCertificate(String cpaId, String fromPartyId) {
+        if (cpaId == null || fromPartyId == null) {
+            throw new EbmsException("CERTIFICATE_NOT_FOUND", "CPA of afzender ontbreekt voor ACK-verificatie");
+        }
+        List<PartnerCertificateDto> certificates = cpaValidationService.getPartnerCertificates(cpaId, fromPartyId);
+        return certificates.stream()
+            .filter(cert -> cert.getCertificateUsage() == null
+                || cert.getCertificateUsage().toUpperCase().contains("SIGNING"))
+            .filter(cert -> cert.getCertificatePem() != null && !cert.getCertificatePem().isBlank())
+            .findFirst()
+            .map(PartnerCertificateDto::getCertificatePem)
+            .orElseThrow(() -> new EbmsException("CERTIFICATE_NOT_FOUND",
+                "Geen bruikbaar partnercertificaat voor ACK-verificatie: CPA=" + cpaId
+                    + " party=" + fromPartyId));
     }
     @Scheduled(fixedDelayString = "PT1H")
     @Transactional
