@@ -788,6 +788,8 @@ INBOUND bericht dat vastzat op PROCESSING liep elke ~10 minuten in een eindeloze
 - **Gebruikerskeuze (september 2026):** URL Mapping (CPA endpoint-override voor Logius-
   certificering) expliciet AFGEWEZEN — "niet nodig, heb alles onder controle met hosts en certs".
   Van de backlog verwijderd.
+- **Gebruikerskeuze (september 2026):** Keystore Secret-volume Helm-fix expliciet AFGEWEZEN —
+  "niet nodig, deploy is geregeld". Van de backlog verwijderd.
 
 ### P0 – Fase 4: auditor-service (GEPARKEERD IN BACKLOG)
 - **Discussie (augustus 2026):** gebruiker wil niet noodzakelijk een eigen microservice bouwen
