@@ -763,6 +763,32 @@ INBOUND bericht dat vastzat op PROCESSING liep elke ~10 minuten in een eindeloze
   Testcontainers-testcallsites naar `findByMessageIdAndDirection`). Geen Docker/RabbitMQ/Postgres
   end-to-end run (bekende sandbox-restrictie, zoals eerdere fases).
 
+### Kritieke bugfix: mTLS "not a proxy instance" + saveAndFlush-regressie (voltooid – september 2026)
+- **Directe aanleiding:** gebruiker deed een mTLS-ping naar een echte Digikoppeling/Logius
+  compliance-voorziening en kreeg `MTLS_CONFIG_ERROR: not a proxy instance`; daarnaast bleek uit
+  eigen K8s-logs dat de messageId-botsing (self-loopback, zie vorige fix) alsnog als "Interne
+  verwerkingsfout" naar de partner lekte i.p.v. stil gelogd te worden.
+- **Root cause 1 (regressie eigen fix):** `messageRepository.save()` in de
+  `DataIntegrityViolationException`-catch-blokken (`persistFailed`/`createOrUpdateProcessing`)
+  vangt de constraint-violation niet, omdat Hibernate de INSERT uitstelt tot flush-tijd (bij
+  `@Transactional(REQUIRES_NEW)` gebeurt dat bij commit, ná de try/catch). Fix: `save()` →
+  `saveAndFlush()` op beide insert-paden, zodat de violation synchroon binnen de try optreedt.
+- **Root cause 2:** `ClientProxy.getClient(dispatch)` werkt alleen voor WSDL-gegenereerde
+  JDK-proxy-clients; onze WSDL-loze `Dispatch` (via `service.createDispatch()`) is een concrete
+  `DispatchImpl`-klasse, geen proxy → altijd `"not a proxy instance"`. Voor timeouts cosmetisch
+  (fallback werkte), voor mTLS fataal (geen fallback voor TLS-trust-materiaal) — blokkeerde elke
+  echte HTTPS-verzending.
+- [x] `OutboundSoapClient.getCxfClient(dispatch)` (NIEUW) – directe cast naar
+  `org.apache.cxf.jaxws.DispatchImpl` i.p.v. `ClientProxy.getClient()`, gebruikt in zowel
+  `configureTimeouts()` als `configureMtls()`
+- **Testing_agent verificatie (geslaagd):** `mvn -am compile` BUILD SUCCESS; 47/47 surefire-tests
+  groen (1 test aangepast: mock-target van `save`→`saveAndFlush`). Geen Docker/echte HTTPS-
+  testserver in sandbox — gebruiker bevestigt zelf in eigen K8s-omgeving dat de compliance-ping
+  nu doorkomt.
+- **Gebruikerskeuze (september 2026):** URL Mapping (CPA endpoint-override voor Logius-
+  certificering) expliciet AFGEWEZEN — "niet nodig, heb alles onder controle met hosts en certs".
+  Van de backlog verwijderd.
+
 ### P0 – Fase 4: auditor-service (GEPARKEERD IN BACKLOG)
 - **Discussie (augustus 2026):** gebruiker wil niet noodzakelijk een eigen microservice bouwen
   om `ebms.audit.events` (queue bestaat al, zie `RabbitMqConfig.QUEUE_AUDIT`, gepubliceerd door
