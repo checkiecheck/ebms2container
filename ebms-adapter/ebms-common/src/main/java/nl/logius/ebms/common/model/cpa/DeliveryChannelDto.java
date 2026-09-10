@@ -37,4 +37,7 @@ public class DeliveryChannelDto {
 
     /** MessageExpiry in seconden (persistDuration). */
     private Integer persistDuration;
+
+    /** ebXML MessagingCharacteristics/@syncReplyMode: none | mshSignalsOnly | signalsAndResponse. */
+    private String syncReplyMode;
 }

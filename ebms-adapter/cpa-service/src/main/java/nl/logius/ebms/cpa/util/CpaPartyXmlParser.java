@@ -398,6 +398,7 @@ private static String getLenientAttribute(Element element, String attributeName)
         boolean reliableMessaging = false;
         boolean signed = false;
         boolean encrypted = false;
+        String syncReplyMode = null;
 
         String docExchangeId = getLenientAttribute(channelEl, "docExchangeId");
         Element docExchangeEl = docExchangeId != null ? docExchangesById.get(docExchangeId) : null;
@@ -417,6 +418,12 @@ private static String getLenientAttribute(Element element, String attributeName)
             if (persistEl != null) {
                 persistDuration = parseDurationSecondsSafe(persistEl.getTextContent());
             }
+            // SyncReplyModule (Koppelvlakstandaard ebMS2 v3.3+): "none" is de Digikoppeling-
+            // default (async), "mshSignalsOnly" moet bilateraal in de CPA afgesproken zijn.
+            NodeList mcNodes = docExchangeEl.getElementsByTagNameNS("*", "MessagingCharacteristics");
+            if (mcNodes.getLength() > 0) {
+                syncReplyMode = blankToNull(getLenientAttribute((Element) mcNodes.item(0), "syncReplyMode"));
+            }
         }
 
         return CpaDeliveryChannelEntity.builder()
@@ -429,6 +436,7 @@ private static String getLenientAttribute(Element element, String attributeName)
             .retryCount(retryCount)
             .retryInterval(retryInterval)
             .persistDuration(persistDuration)
+            .syncReplyMode(syncReplyMode)
             .build();
     }
 

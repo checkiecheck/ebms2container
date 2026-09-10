@@ -125,6 +125,7 @@ public class CpaService {
             .retryCount(dto.getRetryCount())
             .retryInterval(dto.getRetryInterval())
             .persistDuration(dto.getPersistDuration())
+            .syncReplyMode(dto.getSyncReplyMode())
             .build();
         return cpaMapper.toChannelDto(channelRepository.save(entity));
     }

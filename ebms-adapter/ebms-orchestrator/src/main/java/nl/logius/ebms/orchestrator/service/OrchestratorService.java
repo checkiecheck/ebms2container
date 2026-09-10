@@ -9,6 +9,7 @@ import nl.logius.ebms.common.model.amqp.AuditEvent;
 import nl.logius.ebms.common.model.amqp.EbmsInboundMessage;
 import nl.logius.ebms.common.model.amqp.EbmsAckEvent;
 import nl.logius.ebms.common.model.amqp.EbmsOutboundMessage;
+import nl.logius.ebms.common.model.cpa.DeliveryChannelDto;
 import nl.logius.ebms.common.model.ebxml.AckRequested;
 import nl.logius.ebms.common.model.ebxml.EbxmlMessageHeader;
 import nl.logius.ebms.common.model.ebxml.MessageInfo;
@@ -53,6 +54,7 @@ public class OrchestratorService {
     private final CryptoServiceClient   cryptoServiceClient;
     private final RetryProperties       retryProperties;
     private final InboundMessageTrackingService trackingService;
+    private final AckSendingService     ackSendingService;
 
     @Value("${ebms.inbound.decryption-key-alias:encryption-key}")
     private String decryptionKeyAlias;
@@ -148,17 +150,21 @@ public class OrchestratorService {
             // 8. Update status naar DELIVERED (succesvol op AMQP inbound-queue gepubliceerd)
             trackingService.markDelivered(messageId);
 
-            // 9. Construeer en retourneer SOAP ACK (alleen bij rm-profielen)
-            boolean needsAck = header.getAckRequested() != null;
-            if (needsAck) {
-                return soapHelper.createAck(header);
-            }
-            return soapHelper.createEmptyResponse();
+            // 9. Construeer en retourneer respons: synchrone ACK, of een lege respons + een
+            //    losse asynchrone ACK op de achtergrond (CPA syncReplyMode="none" - Digikoppeling-
+            //    default conform Koppelvlakstandaard ebMS2 v3.3+).
+            String fromPartyId = header.getFrom().isEmpty() ? null : header.getFrom().get(0).getValue();
+            return buildInboundResponse(header, cpaId, fromPartyId);
 
         } catch (DuplicateMessageException e) {
-            // Al afgehandeld door persistDuplicate() (audit gepubliceerd) - origineel bericht
-            // blijft ongewijzigd, geen FAILED-rij nodig.
-            throw e;
+            // Al afgehandeld door persistDuplicate() (audit + duplicate_count gepubliceerd) -
+            // origineel bericht blijft ongewijzigd. Spec-conform (ebXML MSG v2.0 §7.4 Duplicate
+            // Elimination): het eerder gegenereerde antwoord opnieuw sturen i.p.v. een foutmelding,
+            // zodat een verzender die zijn RM-retry deed omdat het eerste antwoord verloren ging,
+            // nu alsnog een geldige ACK/bevestiging krijgt (en bij async-mode een nieuwe
+            // ACK-verzendpoging op de achtergrond triggert).
+            String fromPartyId = header.getFrom().isEmpty() ? null : header.getFrom().get(0).getValue();
+            return buildInboundResponse(header, cpaId, fromPartyId);
         } catch (EbmsException e) {
             log.error("[INBOUND] Afgewezen: messageId={} code={} reden={}",
                 messageId, e.getErrorCode(), e.getMessage());
@@ -185,6 +191,38 @@ public class OrchestratorService {
                 .errorDetail(e.getMessage())
                 .build());
             throw e;
+        }
+    }
+
+    // ── Reliable Messaging: sync/async respons ────────────────────────────
+
+    /**
+     * Bouwt de respons op een inkomend bericht: een synchrone ACK (in de HTTP-respons zelf),
+     * een asynchrone ACK (lege HTTP-respons + losse achtergrond-verzending), of een lege respons
+     * (best effort, geen ACK vereist).
+     */
+    private SOAPMessage buildInboundResponse(EbxmlMessageHeader header, String cpaId, String fromPartyId) {
+        boolean needsAck = header.getAckRequested() != null;
+        if (needsAck && isAsyncReplyMode(cpaId, fromPartyId)) {
+            ackSendingService.sendAsyncAck(header, cpaId, fromPartyId);
+            return soapHelper.createEmptyResponse();
+        }
+        return needsAck ? soapHelper.createAck(header) : soapHelper.createEmptyResponse();
+    }
+
+    /**
+     * True als de CPA voor deze afzender {@code syncReplyMode="none"} voorschrijft (Digikoppeling-
+     * default). Fail-safe: bij een onbekend/onbereikbaar afleverkanaal blijft het huidige
+     * synchrone gedrag behouden i.p.v. de verwerking te blokkeren.
+     */
+    private boolean isAsyncReplyMode(String cpaId, String fromPartyId) {
+        try {
+            DeliveryChannelDto channel = cpaValidationService.getDeliveryChannel(cpaId, fromPartyId);
+            return "none".equalsIgnoreCase(channel.getSyncReplyMode());
+        } catch (Exception e) {
+            log.debug("[INBOUND] Kon syncReplyMode niet bepalen (cpaId={} fromPartyId={}) - "
+                + "synchrone ACK blijft van kracht: {}", cpaId, fromPartyId, e.getMessage());
+            return false;
         }
     }
 

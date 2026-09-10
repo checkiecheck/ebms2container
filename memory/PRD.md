@@ -802,6 +802,41 @@ INBOUND bericht dat vastzat op PROCESSING liep elke ~10 minuten in een eindeloze
 - **Zelf getest:** JS-syntax gevalideerd via `node --check` op het geëxtraheerde script-blok — OK.
   Geen live browsertest mogelijk (geen draaiende Java-service in deze sandbox, bekende restrictie).
 
+### Feature: ebMS Reliable Messaging – Async ACKs & Duplicaatonderdrukking (voltooid – september 2026)
+- **Aanleiding:** gebruiker vroeg een analyse; correctie op eigen aanname via web-onderzoek naar
+  de Digikoppeling Koppelvlakstandaard ebMS2 v3.3+: **async is de default** (CPA
+  `MessagingCharacteristics/@syncReplyMode="none"`), sync (`mshSignalsOnly`) is de bilateraal
+  afgesproken uitzondering. Gebruikers compliance-CPA heeft `syncReplyMode="none"` → async ACK
+  is voor die partner verplicht.
+- **Gebruikerskeuzes:** `syncReplyMode` CPA-gedreven parsen (geen config-vlag); duplicaatonder-
+  drukking-met-hergebruikte-respons in dezelfde beurt meenemen; ACK-signing (`AckRequested.
+  signed=true`) bewust NIET meegenomen — apart backlog-item.
+- [x] `cpa_delivery_channel.sync_reply_mode` (NIEUW, `V2__add_sync_reply_mode.sql`) — geparsed
+  door `CpaPartyXmlParser` uit `DocExchange/MessagingCharacteristics/@syncReplyMode`
+  (namespace-agnostisch via bestaande `getLenientAttribute`); `DeliveryChannelDto`/`CpaService`
+  uitgebreid.
+- [x] `AsyncConfig` (NIEUW) — `@EnableAsync` + begrensde `ackTaskExecutor` (core=2 max=5 queue=50,
+  i.p.v. Springs onbegrensde default).
+- [x] `AckSendingService.sendAsyncAck()` (NIEUW) — bouwt de ACK via `SoapHelper.createAck()`,
+  zoekt het kanaal van de ORIGINELE VERZENDER op (reverse lookup: `getDeliveryChannel(cpaId,
+  fromPartyId)`) en verstuurt via de bestaande `OutboundSoapClient`. Fire-and-forget: een
+  mislukking wordt gelogd, niet doorgegooid (partner's eigen RM-retry triggert een nieuwe poging).
+- [x] `OrchestratorService.buildInboundResponse()`/`isAsyncReplyMode()` (NIEUW) — bij
+  `syncReplyMode="none"` + `AckRequested`: lege synchrone HTTP-respons + async ACK op de
+  achtergrond. Fail-safe: bij een onbekend/onbereikbaar kanaal (o.a. alle bestaande test-CPA's
+  zonder dit attribuut) blijft het bestaande synchrone gedrag intact.
+- [x] Duplicaatonderdrukking (Gap 1): `DuplicateMessageException` wordt nu binnen
+  `processInboundMessage()` afgevangen en retourneert via `buildInboundResponse()` hetzelfde
+  soort antwoord als de eerste keer (regeneratie), i.p.v. een `DuplicateElimination`-foutmelding —
+  spec-conform (ebXML MSG v2.0 §7.4). Bij async-mode triggert een duplicaat een NIEUWE
+  ACK-verzendpoging. `EbmsMessageProvider`'s dode catch-blok verwijderd.
+- **Bewust buiten scope:** ACK-signing (`AckRequested.signed=true` via crypto-service) — apart
+  backlog-item.
+- **Testing_agent verificatie (geslaagd):** 25 nieuwe unit-tests; 107/107 cpa-service + 62/62
+  ebms-orchestrator groen; compilatie OK voor alle 4 modules. Geen live Digikoppeling-endpoint in
+  sandbox — alleen mock-niveau bewijs van de call-chain (bevestigd correct, incl. reverse lookup
+  en fail-safe-tak).
+
 ### P0 – Fase 4: auditor-service (GEPARKEERD IN BACKLOG)
 - **Discussie (augustus 2026):** gebruiker wil niet noodzakelijk een eigen microservice bouwen
   om `ebms.audit.events` (queue bestaat al, zie `RabbitMqConfig.QUEUE_AUDIT`, gepubliceerd door

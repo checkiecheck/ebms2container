@@ -6,7 +6,6 @@ import jakarta.xml.soap.SOAPMessage;
 import jakarta.xml.ws.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import nl.logius.ebms.common.exception.DuplicateMessageException;
 import nl.logius.ebms.common.exception.EbmsException;
 import nl.logius.ebms.common.model.ebxml.EbxmlMessageHeader;
 import nl.logius.ebms.orchestrator.service.OrchestratorService;
@@ -78,9 +77,6 @@ public class EbmsMessageProvider implements Provider<SOAPMessage> {
             String rawSoap = extractRawXmlPayload(request);
             return orchestratorService.processInboundMessage(request, header, rawSoap, clientOin);
 
-        } catch (DuplicateMessageException e) {
-            log.warn("[DUPLICATE] {}", e.getMessage());
-            return soapHelper.createErrorResponse("DuplicateElimination", e.getMessage(), null);
         } catch (EbmsException e) {
             log.error("[SECURITY] Bericht afgewezen: errorCode={} msg={} clientOin={}",
                 e.getErrorCode(), e.getMessage(), clientOin);

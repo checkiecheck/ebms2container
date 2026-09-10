@@ -2,7 +2,6 @@ package nl.logius.ebms.orchestrator;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.xml.soap.*;
-import nl.logius.ebms.common.exception.DuplicateMessageException;
 import nl.logius.ebms.common.exception.XmlSecurityException;
 import nl.logius.ebms.common.model.amqp.AuditEvent;
 import nl.logius.ebms.common.model.amqp.EbmsAckEvent;
@@ -306,18 +305,26 @@ class InboundPipelineIntegrationTest {
     // ═══════════════════════════════════════════════════════════════════════════
 
     @Test
-    @DisplayName("Dubbele messageId: DuplicateMessageException gegooid bij tweede aanbieding")
-    void processInboundMessage_duplicateMessageId_rejectsSecondSubmission() throws Exception {
-        String rawSoap = buildSoapXml("msg-dup-001", false, false, false);
-        EbxmlMessageHeader header = buildHeader("msg-dup-001", "conv-msg-dup-001", null);
+    @DisplayName("Dubbele messageId: exception NIET doorgeworpen; response wordt geregenereerd (Gap 1, iteration_30)")
+    void processInboundMessage_duplicateMessageId_returnsRegeneratedResponse() throws Exception {
+        // AckRequested aanwezig zodat een geldige ACK/response terugkomt bij de duplicaat-aanbieding.
+        String rawSoap = buildSoapXml("msg-dup-001", false, false, true);
+        AckRequested ackReq = AckRequested.builder().mustUnderstand(true).signed(false).build();
+        EbxmlMessageHeader header = buildHeader("msg-dup-001", "conv-msg-dup-001", ackReq);
 
         // Eerste verwerking: slaagt
-        orchestratorService.processInboundMessage(parseSoap(rawSoap), header, rawSoap, CLIENT_OIN);
+        SOAPMessage first = orchestratorService.processInboundMessage(
+            parseSoap(rawSoap), header, rawSoap, CLIENT_OIN);
+        assertThat(first).isNotNull();
+        assertThat(first.getSOAPBody().hasFault()).isFalse();
 
-        // Tweede verwerking: zelfde messageId
-        assertThatThrownBy(() ->
-            orchestratorService.processInboundMessage(parseSoap(rawSoap), header, rawSoap, CLIENT_OIN))
-            .isInstanceOf(DuplicateMessageException.class);
+        // Tweede verwerking: zelfde messageId - GOOIT GEEN EXCEPTION MEER
+        // (iteration_30: DuplicateMessageException wordt intern gevangen en de eerder gegenereerde
+        // respons wordt opnieuw opgebouwd i.p.v. een DuplicateElimination-fault).
+        SOAPMessage second = orchestratorService.processInboundMessage(
+            parseSoap(rawSoap), header, rawSoap, CLIENT_OIN);
+        assertThat(second).isNotNull();
+        assertThat(second.getSOAPBody().hasFault()).isFalse();
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

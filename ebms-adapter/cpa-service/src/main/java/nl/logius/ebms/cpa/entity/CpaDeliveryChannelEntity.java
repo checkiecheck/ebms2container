@@ -64,6 +64,15 @@ public class CpaDeliveryChannelEntity {
     @Column(name = "persist_duration")
     private Integer persistDuration;
 
+    /**
+     * ebXML {@code MessagingCharacteristics/@syncReplyMode}: {@code none} (async, Digikoppeling-
+     * default conform Koppelvlakstandaard ebMS2 v3.3+), {@code mshSignalsOnly} (synchrone
+     * ACK/foutmelding; business-respons blijft async) of {@code signalsAndResponse}. {@code null}
+     * als niet aanwezig in de CPA - de orchestrator valt dan terug op synchroon gedrag.
+     */
+    @Column(name = "sync_reply_mode", length = 50)
+    private String syncReplyMode;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
