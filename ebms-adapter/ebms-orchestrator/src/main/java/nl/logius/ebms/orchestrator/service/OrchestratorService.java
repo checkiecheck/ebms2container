@@ -204,10 +204,32 @@ public class OrchestratorService {
     private SOAPMessage buildInboundResponse(EbxmlMessageHeader header, String cpaId, String fromPartyId) {
         boolean needsAck = header.getAckRequested() != null;
         if (needsAck && isAsyncReplyMode(cpaId, fromPartyId)) {
-            ackSendingService.sendAsyncAck(header, cpaId, fromPartyId);
+            triggerAsyncAck(header, cpaId, fromPartyId);
             return soapHelper.createEmptyResponse();
         }
         return needsAck ? soapHelper.createAck(header) : soapHelper.createEmptyResponse();
+    }
+
+    /**
+     * Start de async-ACK-verzending, geïsoleerd van het hoofdpad.
+     *
+     * <p>Op dit punt is het bericht zelf al succesvol ontvangen, gepersisteerd en op de
+     * AMQP-queue gepubliceerd (stap 5-8). {@code @Async} submit't de taak synchroon aan de
+     * {@code ackTaskExecutor}-queue - is die vol (bv. een piek aan async-ACK's), dan gooit de
+     * executor direct een {@code TaskRejectedException} in DEZE thread, vóórdat de taak zelf ooit
+     * start. Zonder deze try/catch belandt die exception in het generieke foutpad van
+     * {@code processInboundMessage()}, wat het al succesvolle bericht ten onrechte op FAILED zou
+     * zetten en een foutrespons naar de partner zou sturen.
+     */
+    private void triggerAsyncAck(EbxmlMessageHeader header, String cpaId, String fromPartyId) {
+        try {
+            ackSendingService.sendAsyncAck(header, cpaId, fromPartyId);
+        } catch (Exception e) {
+            log.error("[INBOUND] Kon async-ACK-taak niet inplannen (ackTaskExecutor mogelijk vol) - "
+                + "het bericht zelf is al succesvol verwerkt; een RM-retry van de partner triggert "
+                + "later een nieuwe ACK-poging: messageId={} reden={}",
+                header.getMessageInfo().getMessageId(), e.getMessage());
+        }
     }
 
     /**
