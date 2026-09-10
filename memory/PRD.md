@@ -790,6 +790,8 @@ INBOUND bericht dat vastzat op PROCESSING liep elke ~10 minuten in een eindeloze
   Van de backlog verwijderd.
 - **Gebruikerskeuze (september 2026):** Keystore Secret-volume Helm-fix expliciet AFGEWEZEN —
   "niet nodig, deploy is geregeld". Van de backlog verwijderd.
+- **Gebruikerskeuze (september 2026):** Duplicaat-metriek (Micrometer-counter voor IN/OUT
+  messageId-botsing) expliciet AFGEWEZEN. Van de backlog verwijderd.
 
 ### P0 – Fase 4: auditor-service (GEPARKEERD IN BACKLOG)
 - **Discussie (augustus 2026):** gebruiker wil niet noodzakelijk een eigen microservice bouwen
