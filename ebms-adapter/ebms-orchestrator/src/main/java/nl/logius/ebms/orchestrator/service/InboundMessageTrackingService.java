@@ -103,7 +103,7 @@ public class InboundMessageTrackingService {
             EbmsMessageEntity entity = buildEntity(header, rawSoap, clientOin);
             entity.setStatus(MessageStatus.FAILED);
             entity.setErrorMessage(errorMessage);
-            messageRepository.save(entity);
+            messageRepository.saveAndFlush(entity);
         } catch (DataIntegrityViolationException e) {
             log.error("[INBOUND] Kon FAILED-bericht NIET persisteren: messageId={} bestaat al als bericht met "
                 + "een andere richting (unique constraint op message_id) - de bestaande rij is NIET "

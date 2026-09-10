@@ -88,7 +88,7 @@ public class OutboundMessageTrackingService {
             .build();
 
         try {
-            return messageRepository.save(entity);
+            return messageRepository.saveAndFlush(entity);
         } catch (DataIntegrityViolationException e) {
             log.error("[OUTBOUND] Kon PROCESSING-bericht NIET persisteren: messageId={} bestaat al als bericht "
                 + "met een andere richting (unique constraint op message_id) - dit duidt op een messageId-"

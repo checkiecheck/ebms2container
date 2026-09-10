@@ -10,7 +10,7 @@ import nl.logius.ebms.common.exception.EbmsException;
 import nl.logius.ebms.common.model.cpa.PartnerCertificateDto;
 import nl.logius.ebms.orchestrator.service.CpaValidationService;
 import org.apache.cxf.endpoint.Client;
-import org.apache.cxf.frontend.ClientProxy;
+import org.apache.cxf.jaxws.DispatchImpl;
 import org.apache.cxf.transport.http.HTTPConduit;
 import org.apache.cxf.transports.http.configuration.HTTPClientPolicy;
 import org.apache.hc.core5.ssl.SSLContextBuilder;
@@ -215,12 +215,25 @@ public class OutboundSoapClient {
     }
 
     /**
+     * Haalt de onderliggende CXF {@link Client} op uit een {@link Dispatch}.
+     * {@code ClientProxy.getClient()} werkt alleen voor WSDL-gegenereerde proxy-clients (een JDK
+     * dynamic proxy) - onze WSDL-loze {@code Dispatch} (via {@code service.createDispatch()}) is
+     * een concrete klasse ({@code DispatchImpl}), geen proxy, en gaf daardoor altijd
+     * "not a proxy instance" terug. Voor timeouts was dat cosmetisch (fallback via
+     * request-context bleef werken), maar voor mTLS is er geen fallback - elke HTTPS-verzending
+     * (bv. naar een Digikoppeling/Logius-compliance-endpoint) faalde daardoor hard.
+     */
+    private Client getCxfClient(Dispatch<SOAPMessage> dispatch) {
+        return ((DispatchImpl<?>) dispatch).getClient();
+    }
+
+    /**
      * Configureert connect- en read-timeouts via de CXF HTTPConduit.
      * Voorkomt thread-exhaustion bij trage externe overheidsvoorzieningen (BIO vereiste).
      */
     private void configureTimeouts(Dispatch<SOAPMessage> dispatch) {
         try {
-            Client client = ClientProxy.getClient(dispatch);
+            Client client = getCxfClient(dispatch);
             HTTPConduit conduit = (HTTPConduit) client.getConduit();
             HTTPClientPolicy policy = new HTTPClientPolicy();
             policy.setConnectionTimeout(connectTimeoutMs);
@@ -243,7 +256,7 @@ public class OutboundSoapClient {
      */
     private void configureMtls(Dispatch<SOAPMessage> dispatch, SSLContext sslContext) {
         try {
-            Client client = ClientProxy.getClient(dispatch);
+            Client client = getCxfClient(dispatch);
             HTTPConduit conduit = (HTTPConduit) client.getConduit();
             org.apache.cxf.configuration.jsse.TLSClientParameters tlsParams =
                 new org.apache.cxf.configuration.jsse.TLSClientParameters();

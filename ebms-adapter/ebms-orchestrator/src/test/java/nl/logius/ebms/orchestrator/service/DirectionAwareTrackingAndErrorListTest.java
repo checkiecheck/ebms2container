@@ -117,14 +117,17 @@ class DirectionAwareTrackingAndErrorListTest {
             when(repo.findByMessageIdAndDirection(MID, MessageDirection.INBOUND))
                 .thenReturn(Optional.empty());
             // Simuleer de DB-uq_message_id constraint: een nieuwe INSERT met bestaande messageId faalt.
-            when(repo.save(any(EbmsMessageEntity.class)))
+            // NB: saveAndFlush wordt gebruikt (i.p.v. save) zodat de constraint-violation synchroon
+            // binnen de try-catch afgaat in plaats van pas bij transactie-commit (na de methode).
+            when(repo.saveAndFlush(any(EbmsMessageEntity.class)))
                 .thenThrow(new DataIntegrityViolationException("uq_message_id"));
 
             // Mag GEEN exception naar buiten laten lekken - de FAILED-poging is best-effort.
             inboundTracking.persistFailed(header, "<raw/>", "OIN-A", "spoofing");
 
-            // Precies één save-poging (de INSERT), daarna gevangen; geen tweede save/update.
-            verify(repo, times(1)).save(any(EbmsMessageEntity.class));
+            // Precies één saveAndFlush-poging (de INSERT), daarna gevangen; geen tweede save/update.
+            verify(repo, times(1)).saveAndFlush(any(EbmsMessageEntity.class));
+            verify(repo, never()).save(any(EbmsMessageEntity.class));
         }
 
         @Test
