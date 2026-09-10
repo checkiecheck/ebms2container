@@ -12,6 +12,7 @@ import nl.logius.ebms.common.model.amqp.EbmsOutboundMessage;
 import nl.logius.ebms.common.model.cpa.DeliveryChannelDto;
 import nl.logius.ebms.common.model.ebxml.AckRequested;
 import nl.logius.ebms.common.model.ebxml.EbxmlMessageHeader;
+import nl.logius.ebms.common.model.ebxml.EbxmlProfile;
 import nl.logius.ebms.common.model.ebxml.MessageInfo;
 import nl.logius.ebms.common.model.ebxml.PartyId;
 import nl.logius.ebms.common.model.ebxml.ServiceType;
@@ -61,6 +62,9 @@ public class OrchestratorService {
 
     @Value("${ebms.security.enforce-inbound-oin-validation:true}")
     private boolean enforceInboundOinValidation;
+
+    @Value("${ebms.outbound.signing-key-alias:signing-key}")
+    private String signingKeyAlias;
 
     // ── Inbound message processing ────────────────────────────────────────
 
@@ -207,7 +211,37 @@ public class OrchestratorService {
             triggerAsyncAck(header, cpaId, fromPartyId);
             return soapHelper.createEmptyResponse();
         }
-        return needsAck ? soapHelper.createAck(header) : soapHelper.createEmptyResponse();
+        return needsAck
+            ? createSynchronousAck(header, cpaRequiresSigning(cpaId, fromPartyId))
+            : soapHelper.createEmptyResponse();
+    }
+
+    private SOAPMessage createSynchronousAck(EbxmlMessageHeader header, boolean cpaRequiresSigning) {
+        SOAPMessage ack = soapHelper.createAck(header);
+        AckRequested ackRequested = header.getAckRequested();
+        if (ackRequested == null || (!ackRequested.isSigned() && !cpaRequiresSigning)) {
+            return ack;
+        }
+
+        String messageId = header.getMessageInfo().getMessageId();
+        String ackXml = soapHelper.soapToString(ack);
+        String signedAckXml = cryptoServiceClient.sign(ackXml, signingKeyAlias, messageId);
+        return soapHelper.soapFromString(signedAckXml);
+    }
+
+    private boolean cpaRequiresSigning(String cpaId, String fromPartyId) {
+        if (fromPartyId == null) {
+            return false;
+        }
+        try {
+            DeliveryChannelDto channel = cpaValidationService.getDeliveryChannel(cpaId, fromPartyId);
+            return channel != null && channel.getDkProfile() != null
+                && EbxmlProfile.fromCode(channel.getDkProfile()).requiresSigning();
+        } catch (Exception e) {
+            log.debug("[INBOUND] Kon CPA-signingbeleid niet bepalen (cpaId={} fromPartyId={}): {}",
+                cpaId, fromPartyId, e.getMessage());
+            return false;
+        }
     }
 
     /**

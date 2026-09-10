@@ -66,6 +66,7 @@ class OrchestratorServiceReliableMessagingResponseTest {
 
     private SOAPMessage request;
     private SOAPMessage embeddedAck;
+    private SOAPMessage signedAck;
     private SOAPMessage emptyResponse;
 
     private static final String MESSAGE_ID = "msg-rm-1";
@@ -80,6 +81,7 @@ class OrchestratorServiceReliableMessagingResponseTest {
 
         request = mock(SOAPMessage.class);
         embeddedAck = mock(SOAPMessage.class);
+        signedAck = mock(SOAPMessage.class);
         emptyResponse = mock(SOAPMessage.class);
 
         when(cpaValidationService.validateCpaAndOin(anyString(), nullable(String.class)))
@@ -92,6 +94,10 @@ class OrchestratorServiceReliableMessagingResponseTest {
     }
 
     private EbxmlMessageHeader header(boolean ackRequested) {
+        return header(ackRequested, false);
+    }
+
+    private EbxmlMessageHeader header(boolean ackRequested, boolean signed) {
         return EbxmlMessageHeader.builder()
             .cpaId(CPA_ID).conversationId("conv-1")
             .from(List.of(PartyId.builder().value(FROM_OIN).type("URN:OIN").build()))
@@ -100,7 +106,9 @@ class OrchestratorServiceReliableMessagingResponseTest {
             .service(ServiceType.builder().value("urn:t").type("urn:t").build())
             .action("send")
             .messageInfo(MessageInfo.builder().messageId(MESSAGE_ID).timestamp(Instant.now()).build())
-            .ackRequested(ackRequested ? AckRequested.builder().build() : null)
+            .ackRequested(ackRequested
+                ? AckRequested.builder().signed(signed).build()
+                : null)
             .build();
     }
 
@@ -135,6 +143,23 @@ class OrchestratorServiceReliableMessagingResponseTest {
         assertThat(response).isSameAs(embeddedAck);
         verify(soapHelper).createAck(h);
         verify(ackSendingService, never()).sendAsyncAck(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("Nieuwe sync ACK met signed=true -> crypto-service sign en signed SOAP-response")
+    void syncMode_signedAck_signsResponse() {
+        EbxmlMessageHeader h = header(true, true);
+        mockChannelSyncReplyMode("mshSignalsOnly");
+        when(soapHelper.soapToString(embeddedAck)).thenReturn("<unsigned-ack/>");
+        when(cryptoServiceClient.sign("<unsigned-ack/>", "signing-key", MESSAGE_ID))
+            .thenReturn("<signed-ack/>");
+        when(soapHelper.soapFromString("<signed-ack/>")).thenReturn(signedAck);
+
+        SOAPMessage response = service.processInboundMessage(request, h, "<raw/>", FROM_OIN);
+
+        assertThat(response).isSameAs(signedAck);
+        verify(cryptoServiceClient).sign("<unsigned-ack/>", "signing-key", MESSAGE_ID);
+        verify(soapHelper).soapFromString("<signed-ack/>");
     }
 
     @Test
@@ -209,6 +234,26 @@ class OrchestratorServiceReliableMessagingResponseTest {
         verify(trackingService).recordDuplicate(MESSAGE_ID);
         verify(soapHelper).createAck(h);
         verify(ackSendingService, never()).sendAsyncAck(any(), any(), any());
+        verify(trackingService, never()).persistReceived(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("Duplicate + signed=true -> opnieuw signeren en geen DuplicateElimination")
+    void duplicate_syncMode_signedAck_signsRegeneratedResponse() {
+        EbxmlMessageHeader h = header(true, true);
+        when(messageRepository.existsByMessageId(MESSAGE_ID)).thenReturn(true);
+        mockChannelSyncReplyMode("mshSignalsOnly");
+        when(soapHelper.soapToString(embeddedAck)).thenReturn("<unsigned-ack/>");
+        when(cryptoServiceClient.sign("<unsigned-ack/>", "signing-key", MESSAGE_ID))
+            .thenReturn("<signed-ack/>");
+        when(soapHelper.soapFromString("<signed-ack/>")).thenReturn(signedAck);
+
+        SOAPMessage response = service.processInboundMessage(request, h, "<raw/>", FROM_OIN);
+
+        assertThat(response).isSameAs(signedAck);
+        verify(trackingService).recordDuplicate(MESSAGE_ID);
+        verify(cryptoServiceClient).sign("<unsigned-ack/>", "signing-key", MESSAGE_ID);
+        verify(soapHelper, never()).createErrorResponse(anyString(), anyString(), any());
         verify(trackingService, never()).persistReceived(any(), any(), any());
     }
 

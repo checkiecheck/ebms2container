@@ -8,6 +8,7 @@ import org.w3c.dom.Element;
 import org.w3c.dom.NodeList;
 
 import java.time.Instant;
+import java.io.ByteArrayInputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -339,6 +340,17 @@ public class SoapHelper {
         } catch (Exception e) {
             log.warn("Kan SOAP-bericht niet naar string serialiseren: {}", e.getMessage());
             return "<serialization-error/>";
+        }
+    }
+
+    /** Parseert een SOAP XML-string terug naar een bericht, bijvoorbeeld na XML-DSig signing. */
+    public SOAPMessage soapFromString(String xml) {
+        try {
+            return MessageFactory.newInstance().createMessage(
+                new MimeHeaders(),
+                new ByteArrayInputStream(xml.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Kan SOAP XML niet parsen", e);
         }
     }
 
