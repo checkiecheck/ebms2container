@@ -134,10 +134,11 @@ public class RabbitMqConfig {
     /**
      * Configureert manual acknowledgment mode voor alle {@code @RabbitListener} methoden.
      *
-     * <p>Vereist voor de retry/nack-logica in {@link nl.logius.ebms.orchestrator.service.OutboundMessageService}:
-     * bij een {@link nl.logius.ebms.common.exception.EbmsException} kan het bericht via
-     * {@code channel.basicNack(deliveryTag, false, true)} opnieuw in de queue worden geplaatst
-     * in plaats van automatisch te worden verwijderd.
+    * <p>Vereist voor de expliciete ACK/NACK-afhandeling in
+    * {@link nl.logius.ebms.orchestrator.service.OutboundMessageService}. Tijdelijke outbound-
+    * fouten worden na persistente registratie ge-ACK't en later door de database-scheduler
+    * opnieuw gepubliceerd; permanente fouten worden met {@code requeue=false} naar de DLQ
+    * gestuurd.
      */
     @Bean
     public SimpleRabbitListenerContainerFactory rabbitListenerContainerFactory(

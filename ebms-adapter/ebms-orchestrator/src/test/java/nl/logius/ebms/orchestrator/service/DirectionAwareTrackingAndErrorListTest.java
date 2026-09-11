@@ -300,7 +300,7 @@ class DirectionAwareTrackingAndErrorListTest {
         }
 
         @Test
-        @DisplayName("Regression O-6 - CONNECTION_ERROR remains RETRYABLE (requeue=true)")
+        @DisplayName("Regression O-6 - CONNECTION_ERROR remains RETRYABLE via database scheduler")
         void connectionError_isRetryable() throws Exception {
             stubHappyChannel("osb-be");
             Mockito.doThrow(new EbmsException("CONNECTION_ERROR", "socket timeout"))
@@ -309,7 +309,8 @@ class DirectionAwareTrackingAndErrorListTest {
             service.handleOutboundMessage(outboundMessage, amqpChannel, 3L);
 
             verify(trackingService).markFailed(eq("msg-42"), anyString());
-            verify(amqpChannel).basicNack(anyLong(), anyBoolean(), eq(true));
+            verify(amqpChannel).basicAck(anyLong(), anyBoolean());
+            verify(amqpChannel, never()).basicNack(anyLong(), anyBoolean(), anyBoolean());
         }
     }
 

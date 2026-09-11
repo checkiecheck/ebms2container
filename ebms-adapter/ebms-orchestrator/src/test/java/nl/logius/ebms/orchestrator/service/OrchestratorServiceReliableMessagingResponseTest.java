@@ -87,6 +87,7 @@ class OrchestratorServiceReliableMessagingResponseTest {
     void setUp() {
         ReflectionTestUtils.setField(service, "enforceInboundOinValidation", true);
         ReflectionTestUtils.setField(service, "decryptionKeyAlias", "encryption-key");
+        ReflectionTestUtils.setField(service, "signingKeyAlias", "signing-key");
 
         request = mock(SOAPMessage.class);
         embeddedAck = mock(SOAPMessage.class);

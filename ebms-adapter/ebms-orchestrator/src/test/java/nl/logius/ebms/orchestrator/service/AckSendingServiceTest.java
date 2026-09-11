@@ -28,6 +28,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
  * Mockito-only unit tests voor {@link AckSendingService}.
@@ -111,12 +112,12 @@ class AckSendingServiceTest {
     }
 
     @Test
-    @DisplayName("sendAsyncAck: ontbrekend endpoint -> geen outbound call")
+    @DisplayName("sendAsyncAck: ontbrekend endpoint -> permanente fout, geen outbound call")
     void sendAsyncAck_missingEndpoint_doesNotSend() {
         when(cpaValidationService.getDeliveryChannel(CPA_ID, FROM_PARTY_ID))
             .thenReturn(DeliveryChannelDto.builder().dkProfile("osb-rm").build());
 
-        service.dispatchAck(task(false));
+        assertThrows(IllegalArgumentException.class, () -> service.dispatchAck(task(false)));
 
         verify(soapHelper, never()).createAck(any());
         verify(outboundSoapClient, never()).send(any(), any(), any(), any());

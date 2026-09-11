@@ -143,19 +143,19 @@ public class OutboundMessageService {
 
             trackingService.markFailed(messageId, e.getErrorCode() + ": " + e.getMessage());
 
-            // Requeue alleen als de fout herstelbaar is (niet bij ontbrekend kanaal of ongeldige data)
-            boolean requeue = !NON_RETRYABLE_ERROR_CODES.contains(e.getErrorCode());
-            if (!requeue) {
+            boolean retryable = !NON_RETRYABLE_ERROR_CODES.contains(e.getErrorCode());
+            if (retryable) {
+                ack(amqpChannel, deliveryTag);
+            } else {
                 log.warn("[OUTBOUND] Niet-herstelbare fout voor messageId={}. Bericht wordt niet opnieuw aangeboden.", messageId);
+                nack(amqpChannel, deliveryTag, false);
             }
-
-            nack(amqpChannel, deliveryTag, requeue);
 
         } catch (Exception e) {
             log.error("[OUTBOUND] Onverwachte fout: messageId={}", messageId, e);
             trackingService.markFailed(messageId,
                 e.getClass().getSimpleName() + ": " + (e.getMessage() != null ? e.getMessage() : "<geen detail>"));
-            nack(amqpChannel, deliveryTag, true); // Requeue bij onverwachte technische/systeemfouten
+            ack(amqpChannel, deliveryTag);
         }
     }
 

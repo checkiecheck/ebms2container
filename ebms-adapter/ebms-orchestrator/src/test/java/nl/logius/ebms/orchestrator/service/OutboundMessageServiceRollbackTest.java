@@ -111,7 +111,7 @@ class OutboundMessageServiceRollbackTest {
     // ─────────────────────────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("send() throws RuntimeException → trackingService.markFailed() invoked, geen markSentOrDelivered, nack(requeue=true)")
+    @DisplayName("send() throws RuntimeException → trackingService.markFailed() invoked, geen markSentOrDelivered, basicAck")
     void sendFails_marksFailed_noSentOrDelivered() throws Exception {
         Mockito.doThrow(new RuntimeException("transient network failure"))
             .when(outboundSoapClient).send(anyString(), anyString(), anyString(), anyString());
@@ -126,8 +126,21 @@ class OutboundMessageServiceRollbackTest {
         verify(trackingService, times(1)).markFailed(eq("msg-42"), anyString());
         verify(trackingService, never()).markSentOrDelivered(anyString(), anyBoolean());
 
-        verify(amqpChannel, times(1)).basicNack(anyLong(), anyBoolean(), anyBoolean());
-        verify(amqpChannel, never()).basicAck(anyLong(), anyBoolean());
+        verify(amqpChannel, times(1)).basicAck(anyLong(), anyBoolean());
+        verify(amqpChannel, never()).basicNack(anyLong(), anyBoolean(), anyBoolean());
+    }
+
+    @Test
+    @DisplayName("send() throws EbmsException (herstelbaar) → markFailed() + basicAck zonder requeue")
+    void sendFails_ebmsException_retryable_isAckedForDatabaseRetry() throws Exception {
+        Mockito.doThrow(new EbmsException("NETWORK_FAILURE", "temporary outage"))
+            .when(outboundSoapClient).send(anyString(), anyString(), anyString(), anyString());
+
+        service.handleOutboundMessage(outboundMessage, amqpChannel, 234L);
+
+        verify(trackingService, times(1)).markFailed(eq("msg-42"), anyString());
+        verify(amqpChannel, times(1)).basicAck(anyLong(), anyBoolean());
+        verify(amqpChannel, never()).basicNack(anyLong(), anyBoolean(), anyBoolean());
     }
 
     @Test
