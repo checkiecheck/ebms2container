@@ -32,7 +32,7 @@ class OutboundSoapClientTest {
     }
 
     @Test
-    void send_setsSoapActionFromEbmsAction() throws Exception {
+    void send_setsFixedEbmsSoapAction() throws Exception {
         AtomicReference<String> soapAction = new AtomicReference<>();
         server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
         server.createContext("/ebms", exchange -> {
@@ -69,6 +69,6 @@ class OutboundSoapClientTest {
             "cpa-1",
             "to");
 
-        assertThat(soapAction.get()).isEqualTo("\"TestAction\"");
+        assertThat(soapAction.get()).isEqualTo("\"ebXML\"");
     }
 }

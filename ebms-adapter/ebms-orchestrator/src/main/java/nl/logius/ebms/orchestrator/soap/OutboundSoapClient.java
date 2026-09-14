@@ -50,6 +50,8 @@ import org.w3c.dom.NodeList;
 @Slf4j
 public class OutboundSoapClient {
 
+    private static final String EBMS_SOAP_ACTION = "ebXML";
+
     private static final QName SERVICE_NAME =
         new QName(SoapHelper.EBXML_MSG_NS, "MSHService");
     private static final QName PORT_NAME =
@@ -162,25 +164,14 @@ public class OutboundSoapClient {
         return endpointUrl != null && endpointUrl.toLowerCase().startsWith("https");
     }
 
-    /**
-     * Configureert de SOAP 1.1 HTTP-action vanuit de ebMS MessageHeader.
-     * Zonder expliciete action laat een WSDL-loze Dispatch CXF {@code SOAPAction=""}
-     * uitsturen, wat door Digikoppeling-proxies wordt geweigerd.
-     */
+    /** Configureert de vaste ebMS2 SOAP 1.1 HTTP-action. */
     private void configureSoapAction(Dispatch<SOAPMessage> dispatch, SOAPMessage soapMessage) {
         try {
-            NodeList actions = soapMessage.getSOAPHeader().getElementsByTagNameNS(
-                SoapHelper.EBXML_MSG_NS, "Action");
-            if (actions.getLength() == 0 || actions.item(0).getTextContent().isBlank()) {
-                throw new EbmsException("INVALID_HEADER", "eb:Action ontbreekt in SOAP MessageHeader");
-            }
-
-            String action = actions.item(0).getTextContent().trim();
             dispatch.getRequestContext().put(BindingProvider.SOAPACTION_USE_PROPERTY, Boolean.TRUE);
-            dispatch.getRequestContext().put(BindingProvider.SOAPACTION_URI_PROPERTY, action);
-            soapMessage.getMimeHeaders().setHeader("SOAPAction", '"' + action + '"');
+            dispatch.getRequestContext().put(BindingProvider.SOAPACTION_URI_PROPERTY, EBMS_SOAP_ACTION);
+            soapMessage.getMimeHeaders().setHeader("SOAPAction", '"' + EBMS_SOAP_ACTION + '"');
             soapMessage.saveChanges();
-            log.debug("[OUTBOUND] SOAPAction ingesteld: {}", action);
+            log.debug("[OUTBOUND] SOAPAction ingesteld: \"{}\"", EBMS_SOAP_ACTION);
         } catch (EbmsException e) {
             throw e;
         } catch (Exception e) {
