@@ -28,6 +28,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.anyString;
 
 /**
  * Focused Mockito unit test for {@link MessageStatusReconciliationScheduler}:
@@ -49,6 +50,9 @@ class MessageStatusReconciliationSchedulerTest {
         ReflectionTestUtils.setField(scheduler, "stuckProcessingTimeoutMinutes", 5);
         ReflectionTestUtils.setField(scheduler, "inboundStuckProcessingTimeoutMinutes", 30);
         lenient().when(repo.findStuckProcessingMessages(any(), any())).thenReturn(Collections.emptyList());
+        lenient().when(repo.markStuckProcessingAsFailed(
+            any(UUID.class), any(MessageDirection.class), any(Instant.class), any(Long.class),
+            any(MessageStatus.class), anyString())).thenReturn(1);
     }
 
     @Test
@@ -68,15 +72,12 @@ class MessageStatusReconciliationSchedulerTest {
         assertThat(threshold).isAfterOrEqualTo(before.minus(5, ChronoUnit.MINUTES).minusSeconds(2));
         assertThat(threshold).isBeforeOrEqualTo(after.minus(5, ChronoUnit.MINUTES).plusSeconds(2));
 
-        assertThat(a.getStatus()).isEqualTo(MessageStatus.FAILED);
-        assertThat(a.getErrorMessage()).isNotBlank().contains("Watchdog");
-        assertThat(b.getStatus()).isEqualTo(MessageStatus.FAILED);
-        assertThat(b.getErrorMessage()).isNotBlank();
-
-        @SuppressWarnings("unchecked")
-        ArgumentCaptor<List<EbmsMessageEntity>> listCap = ArgumentCaptor.forClass(List.class);
-        verify(repo, times(1)).saveAll(listCap.capture());
-        assertThat(listCap.getValue()).containsExactly(a, b);
+        verify(repo, times(1)).markStuckProcessingAsFailed(
+            eq(a.getId()), eq(MessageDirection.OUTBOUND), any(Instant.class), eq(a.getVersion()),
+            eq(MessageStatus.FAILED), org.mockito.ArgumentMatchers.contains("Watchdog"));
+        verify(repo, times(1)).markStuckProcessingAsFailed(
+            eq(b.getId()), eq(MessageDirection.OUTBOUND), any(Instant.class), eq(b.getVersion()),
+            eq(MessageStatus.FAILED), org.mockito.ArgumentMatchers.contains("Watchdog"));
     }
 
     @Test
@@ -95,8 +96,9 @@ class MessageStatusReconciliationSchedulerTest {
         assertThat(threshold).isAfterOrEqualTo(before.minus(30, ChronoUnit.MINUTES).minusSeconds(2));
         assertThat(threshold).isBeforeOrEqualTo(after.minus(30, ChronoUnit.MINUTES).plusSeconds(2));
 
-        assertThat(c.getStatus()).isEqualTo(MessageStatus.FAILED);
-        assertThat(c.getErrorMessage()).contains("downstream-consument");
+        verify(repo).markStuckProcessingAsFailed(
+            eq(c.getId()), eq(MessageDirection.INBOUND), any(Instant.class), eq(c.getVersion()),
+            eq(MessageStatus.FAILED), org.mockito.ArgumentMatchers.contains("downstream-consument"));
     }
 
     @Test
@@ -104,7 +106,9 @@ class MessageStatusReconciliationSchedulerTest {
     void emptyResult_isNoop() {
         scheduler.reconcileStuckProcessingMessages();
 
-        verify(repo, never()).saveAll(any());
+        verify(repo, never()).markStuckProcessingAsFailed(
+            any(UUID.class), any(MessageDirection.class), any(Instant.class), any(Long.class),
+            any(MessageStatus.class), anyString());
     }
 
     private EbmsMessageEntity mkEntity(String id) {
@@ -116,6 +120,7 @@ class MessageStatusReconciliationSchedulerTest {
             .fromPartyId("f").toPartyId("t")
             .service("svc").action("act")
             .status(MessageStatus.PROCESSING)
+            .version(0L)
             .timestamp(Instant.now())
             .build();
     }

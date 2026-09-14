@@ -78,12 +78,17 @@ public class MessageStatusReconciliationScheduler {
             : " (mogelijk gecrashte verwerking)";
 
         for (EbmsMessageEntity msg : stuck) {
-            msg.setStatus(MessageStatus.FAILED);
-            msg.setErrorMessage("Watchdog: " + direction + "-bericht bleef langer dan " + timeoutMinutes
-                + " minuten in PROCESSING-status zonder afronding" + reasonSuffix);
-            log.warn("[WATCHDOG] messageId={} gemarkeerd als FAILED (laatst bijgewerkt: {})",
-                msg.getMessageId(), msg.getUpdatedAt());
+            String errorMessage = "Watchdog: " + direction + "-bericht bleef langer dan " + timeoutMinutes
+                + " minuten in PROCESSING-status zonder afronding" + reasonSuffix;
+            int updated = messageRepository.markStuckProcessingAsFailed(
+                msg.getId(), direction, threshold, msg.getVersion(), MessageStatus.FAILED, errorMessage);
+            if (updated == 1) {
+                log.warn("[WATCHDOG] messageId={} gemarkeerd als FAILED (laatst bijgewerkt: {})",
+                    msg.getMessageId(), msg.getUpdatedAt());
+            } else {
+                log.info("[WATCHDOG] messageId={} niet gemarkeerd: status/version is intussen gewijzigd",
+                    msg.getMessageId());
+            }
         }
-        messageRepository.saveAll(stuck);
     }
 }

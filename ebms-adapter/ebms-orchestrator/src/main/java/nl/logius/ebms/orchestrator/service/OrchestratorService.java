@@ -412,7 +412,6 @@ public class OrchestratorService {
      * Interval: configureerbaar via {@code ebms.reliable-messaging.retry-check-interval-ms}.
      */
     @Scheduled(fixedDelayString = "${ebms.reliable-messaging.retry-check-interval-ms:300000}")
-    @Transactional
     public void retryFailedMessages() {
         Instant retryBefore = Instant.now()
             .minusSeconds(retryProperties.getRetryIntervalSeconds());

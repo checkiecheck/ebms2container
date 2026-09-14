@@ -6,6 +6,7 @@ import nl.logius.ebms.orchestrator.entity.MessageStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -86,4 +87,29 @@ public interface EbmsMessageRepository extends JpaRepository<EbmsMessageEntity, 
     List<EbmsMessageEntity> findStuckProcessingMessages(
         @Param("direction") MessageDirection direction,
         @Param("threshold") Instant threshold);
+
+    /**
+     * Markeer een watchdog-kandidaat alleen als dezelfde versie nog steeds oud en PROCESSING is.
+     * Zo veroorzaakt een gelijktijdige outbound-update geen stale-entity save/optimistic-lock-fout.
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+      UPDATE EbmsMessageEntity m
+         SET m.status = :failedStatus,
+           m.errorMessage = :errorMessage,
+           m.version = m.version + 1,
+           m.updatedAt = CURRENT_TIMESTAMP
+       WHERE m.id = :id
+         AND m.direction = :direction
+         AND m.status = 'PROCESSING'
+         AND m.updatedAt < :threshold
+         AND m.version = :version
+      """)
+    int markStuckProcessingAsFailed(
+      @Param("id") UUID id,
+      @Param("direction") MessageDirection direction,
+      @Param("threshold") Instant threshold,
+      @Param("version") Long version,
+      @Param("failedStatus") MessageStatus failedStatus,
+      @Param("errorMessage") String errorMessage);
 }
