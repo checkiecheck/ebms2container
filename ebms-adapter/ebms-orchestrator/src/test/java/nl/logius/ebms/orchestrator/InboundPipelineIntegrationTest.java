@@ -446,7 +446,7 @@ class InboundPipelineIntegrationTest {
 
         mh.addChildElement("Action", "eb", NS).addTextNode("TestAction");
 
-        SOAPElement mi = mh.addChildElement("MessageInfo", "eb", NS);
+        SOAPElement mi = mh.addChildElement("MessageData", "eb", NS);
         mi.addChildElement("Timestamp", "eb", NS).addTextNode(Instant.now().toString());
         mi.addChildElement("MessageId",  "eb", NS).addTextNode(messageId);
 

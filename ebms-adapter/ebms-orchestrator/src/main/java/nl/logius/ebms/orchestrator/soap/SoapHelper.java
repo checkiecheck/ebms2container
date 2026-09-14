@@ -144,9 +144,6 @@ public class SoapHelper {
             mh.addAttribute(env.createName("mustUnderstand", "SOAP-ENV", SOAP_ENV_NS), "1");
             mh.addAttribute(env.createName("version", "eb", EBXML_MSG_NS), "2.0");
 
-            addChild(mh, "CPAId",          EBXML_MSG_NS, header.getCpaId());
-            addChild(mh, "ConversationId", EBXML_MSG_NS, header.getConversationId());
-
             // From
             SOAPElement from = mh.addChildElement("From", "eb", EBXML_MSG_NS);
             if (header.getFrom() != null) {
@@ -170,6 +167,9 @@ public class SoapHelper {
                     partyEl.addTextNode(pid.getValue());
                 }
             }
+
+            addChild(mh, "CPAId",          EBXML_MSG_NS, header.getCpaId());
+            addChild(mh, "ConversationId", EBXML_MSG_NS, header.getConversationId());
 
             // Service
             SOAPElement svc = mh.addChildElement("Service", "eb", EBXML_MSG_NS);
@@ -225,6 +225,11 @@ public class SoapHelper {
             msgHeader.addAttribute(env.createName("mustUnderstand", "SOAP-ENV", SOAP_ENV_NS), "1");
             msgHeader.addAttribute(env.createName("version", "eb", EBXML_MSG_NS), "2.0");
 
+            addParties(msgHeader, env, "From", originalHeader.getTo());
+            addParties(msgHeader, env, "To", originalHeader.getFrom());
+            addChild(msgHeader, "CPAId", EBXML_MSG_NS, originalHeader.getCpaId());
+            addChild(msgHeader, "ConversationId", EBXML_MSG_NS, originalHeader.getConversationId());
+
             // Service = urn:oasis:names:tc:ebxml-msg:service (system service)
             addChild(msgHeader, "Service", EBXML_MSG_NS, EBXML_PING_SERVICE);
             addChild(msgHeader, "Action",  EBXML_MSG_NS, "Acknowledgment");
@@ -251,6 +256,20 @@ public class SoapHelper {
         } catch (SOAPException e) {
             log.error("Fout bij aanmaken ACK-response", e);
             return createEmptyResponse();
+        }
+    }
+
+    private void addParties(SOAPElement parent, SOAPEnvelope env, String direction,
+                            List<PartyId> parties) throws SOAPException {
+        SOAPElement directionElement = parent.addChildElement(direction, "eb", EBXML_MSG_NS);
+        if (parties == null) return;
+        for (PartyId party : parties) {
+            SOAPElement partyElement = directionElement.addChildElement("PartyId", "eb", EBXML_MSG_NS);
+            if (party.getType() != null && !party.getType().isBlank()) {
+                partyElement.addAttribute(
+                    env.createName("type", "eb", EBXML_MSG_NS), party.getType());
+            }
+            partyElement.addTextNode(party.getValue());
         }
     }
 

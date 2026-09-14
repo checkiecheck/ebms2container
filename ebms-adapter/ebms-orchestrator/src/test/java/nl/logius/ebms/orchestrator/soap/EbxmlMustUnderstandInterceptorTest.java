@@ -188,8 +188,8 @@ class EbxmlMustUnderstandInterceptorTest {
                   <eb:Service>urn:svc</eb:Service>
                   <eb:Action>Deliver</eb:Action>
                   <eb:MessageData>
-                    <eb:MessageId>msg-001@test</eb:MessageId>
                     <eb:Timestamp>2026-01-01T00:00:00Z</eb:Timestamp>
+                                        <eb:MessageId>msg-001@test</eb:MessageId>
                   </eb:MessageData>
                 </eb:MessageHeader>
                 """);

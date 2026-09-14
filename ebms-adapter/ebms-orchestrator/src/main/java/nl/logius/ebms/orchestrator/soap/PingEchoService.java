@@ -69,8 +69,8 @@ public class PingEchoService {
             addText(msgHeader, "Service",        SoapHelper.EBXML_PING_SERVICE);
             addText(msgHeader, "Action",         "Pong");
 
-            // MessageInfo
-            SOAPElement msgInfo = msgHeader.addChildElement("MessageInfo", "eb",
+            // MessageData (ebMS2 spec section 3.1.6)
+            SOAPElement msgInfo = msgHeader.addChildElement("MessageData", "eb",
                 SoapHelper.EBXML_MSG_NS);
             addText(msgInfo, "Timestamp",      Instant.now().toString());
             addText(msgInfo, "MessageId",      UUID.randomUUID() + "@ebms-orchestrator");
