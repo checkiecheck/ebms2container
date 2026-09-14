@@ -4,6 +4,7 @@ import jakarta.xml.soap.MessageFactory;
 import jakarta.xml.soap.MimeHeaders;
 import jakarta.xml.soap.SOAPMessage;
 import jakarta.xml.ws.Dispatch;
+import jakarta.xml.ws.BindingProvider;
 import jakarta.xml.ws.Service;
 import lombok.extern.slf4j.Slf4j;
 import nl.logius.ebms.common.exception.EbmsException;
@@ -27,6 +28,7 @@ import java.security.KeyStore;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.util.List;
+import org.w3c.dom.NodeList;
 
 /**
  * Apache CXF {@link Dispatch}&lt;{@link SOAPMessage}&gt; client voor het versturen van
@@ -106,6 +108,8 @@ public class OutboundSoapClient {
                 SOAPMessage.class,
                 Service.Mode.MESSAGE);
 
+            configureSoapAction(dispatch, soapMessage);
+
             // ── 3. Timeouts instellen via CXF HTTPConduit ─────────────────
             configureTimeouts(dispatch);
 
@@ -156,6 +160,32 @@ public class OutboundSoapClient {
 
     private boolean isHttps(String endpointUrl) {
         return endpointUrl != null && endpointUrl.toLowerCase().startsWith("https");
+    }
+
+    /**
+     * Configureert de SOAP 1.1 HTTP-action vanuit de ebMS MessageHeader.
+     * Zonder expliciete action laat een WSDL-loze Dispatch CXF {@code SOAPAction=""}
+     * uitsturen, wat door Digikoppeling-proxies wordt geweigerd.
+     */
+    private void configureSoapAction(Dispatch<SOAPMessage> dispatch, SOAPMessage soapMessage) {
+        try {
+            NodeList actions = soapMessage.getSOAPHeader().getElementsByTagNameNS(
+                SoapHelper.EBXML_MSG_NS, "Action");
+            if (actions.getLength() == 0 || actions.item(0).getTextContent().isBlank()) {
+                throw new EbmsException("INVALID_HEADER", "eb:Action ontbreekt in SOAP MessageHeader");
+            }
+
+            String action = actions.item(0).getTextContent().trim();
+            dispatch.getRequestContext().put(BindingProvider.SOAPACTION_USE_PROPERTY, Boolean.TRUE);
+            dispatch.getRequestContext().put(BindingProvider.SOAPACTION_URI_PROPERTY, action);
+            soapMessage.getMimeHeaders().setHeader("SOAPAction", '"' + action + '"');
+            soapMessage.saveChanges();
+            log.debug("[OUTBOUND] SOAPAction ingesteld: {}", action);
+        } catch (EbmsException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new EbmsException("INVALID_HEADER", "Kon eb:Action niet bepalen: " + e.getMessage());
+        }
     }
 
     /**
