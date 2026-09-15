@@ -155,6 +155,9 @@ public class SoapHelper {
                     partyEl.addTextNode(pid.getValue());
                 }
             }
+            if (header.getFromRole() != null && !header.getFromRole().isBlank()) {
+                addChild(from, "Role", EBXML_MSG_NS, header.getFromRole());
+            }
 
             // To
             SOAPElement to = mh.addChildElement("To", "eb", EBXML_MSG_NS);
@@ -166,6 +169,9 @@ public class SoapHelper {
                     }
                     partyEl.addTextNode(pid.getValue());
                 }
+            }
+            if (header.getToRole() != null && !header.getToRole().isBlank()) {
+                addChild(to, "Role", EBXML_MSG_NS, header.getToRole());
             }
 
             addChild(mh, "CPAId",          EBXML_MSG_NS, header.getCpaId());

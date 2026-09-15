@@ -38,10 +38,21 @@ class SoapHelperMessageHeaderOrderTest {
     @Test
     void buildOutboundSoapUsesOasisMessageHeaderSequence() throws Exception {
         SOAPMessage message = soapHelper.buildOutboundSoap(header(), false);
+        SOAPElement messageHeader = (SOAPElement) message.getSOAPHeader()
+            .getElementsByTagNameNS(SoapHelper.EBXML_MSG_NS, "MessageHeader").item(0);
 
-        assertThat(childNames(message.getSOAPHeader()
-            .getElementsByTagNameNS(SoapHelper.EBXML_MSG_NS, "MessageHeader").item(0)))
+        assertThat(childNames(messageHeader))
             .containsExactly("From", "To", "CPAId", "ConversationId", "Service", "Action", "MessageData");
+        assertThat(childNames(messageHeader.getElementsByTagNameNS(
+            SoapHelper.EBXML_MSG_NS, "From").item(0)))
+            .containsExactly("PartyId", "Role");
+        assertThat(messageHeader.getElementsByTagNameNS(SoapHelper.EBXML_MSG_NS, "From")
+            .item(0).getTextContent()).contains("sender", "Sender");
+        assertThat(childNames(messageHeader.getElementsByTagNameNS(
+            SoapHelper.EBXML_MSG_NS, "To").item(0)))
+            .containsExactly("PartyId", "Role");
+        assertThat(messageHeader.getElementsByTagNameNS(SoapHelper.EBXML_MSG_NS, "To")
+            .item(0).getTextContent()).contains("receiver", "Receiver");
     }
 
     @Test
@@ -100,7 +111,9 @@ class SoapHelperMessageHeaderOrderTest {
             .cpaId("cpa-1")
             .conversationId("conversation-1")
             .from(List.of(PartyId.builder().value("sender").build()))
+            .fromRole("Sender")
             .to(List.of(PartyId.builder().value("receiver").build()))
+            .toRole("Receiver")
             .service(ServiceType.builder().value("urn:test:service").build())
             .action("TestAction")
             .messageInfo(MessageInfo.builder()
