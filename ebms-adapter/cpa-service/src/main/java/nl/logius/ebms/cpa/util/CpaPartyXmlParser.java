@@ -12,6 +12,7 @@ import org.xml.sax.InputSource;
 import nl.logius.ebms.common.model.cpa.PartyInfoDto;
 import nl.logius.ebms.common.util.OinValidator;
 import nl.logius.ebms.cpa.entity.CpaDeliveryChannelEntity;
+import nl.logius.ebms.cpa.entity.CpaOutboundRouteEntity;
 import nl.logius.ebms.cpa.entity.PartnerCertificateEntity;
 import java.util.HashMap;
 import java.util.Map;
@@ -205,6 +206,172 @@ private static String getLenientAttribute(Element element, String attributeName)
 
     private String blankToNull(String value) {
         return (value == null || value.isBlank()) ? null : value;
+    }
+
+    public List<CpaOutboundRouteEntity> parseOutboundRoutes(String cpaXml, String cpaId) {
+        if (cpaXml == null || cpaXml.isBlank()) {
+            return List.of();
+        }
+        try {
+            Document document = parseDocument(cpaXml);
+            Map<String, ActionBinding> bindingsById = new HashMap<>();
+            Map<String, String> channelOwners = new HashMap<>();
+            List<ActionBinding> sendBindings = new ArrayList<>();
+
+            NodeList partyNodes = document.getElementsByTagNameNS("*", "PartyInfo");
+            for (int i = 0; i < partyNodes.getLength(); i++) {
+                Element party = (Element) partyNodes.item(i);
+                Element partyIdElement = firstDescendant(party, "PartyId");
+                if (partyIdElement == null || partyIdElement.getTextContent().isBlank()) {
+                    continue;
+                }
+                String partyId = partyIdElement.getTextContent().trim();
+
+                for (Element channel : descendants(party, "DeliveryChannel")) {
+                    String channelId = blankToNull(getLenientAttribute(channel, "channelId"));
+                    if (channelId != null) {
+                        channelOwners.put(channelId, partyId);
+                    }
+                }
+
+                for (Element collaborationRole : descendants(party, "CollaborationRole")) {
+                    Element roleElement = directChild(collaborationRole, "Role");
+                    String role = roleElement == null
+                        ? null : blankToNull(getLenientAttribute(roleElement, "name"));
+                    for (Element serviceBinding : directChildren(collaborationRole, "ServiceBinding")) {
+                        Element serviceElement = directChild(serviceBinding, "Service");
+                        String service = serviceElement == null
+                            ? null : blankToNull(serviceElement.getTextContent().trim());
+                        String serviceType = serviceElement == null
+                            ? null : blankToNull(getLenientAttribute(serviceElement, "type"));
+                        collectActionBindings(serviceBinding, "CanSend", true, partyId, role,
+                            service, serviceType, bindingsById, sendBindings);
+                        collectActionBindings(serviceBinding, "CanReceive", false, partyId, role,
+                            service, serviceType, bindingsById, sendBindings);
+                    }
+                }
+            }
+
+            List<CpaOutboundRouteEntity> routes = new ArrayList<>();
+            for (ActionBinding sender : sendBindings) {
+                ActionBinding receiver = bindingsById.get(sender.otherBindingId());
+                if (!sender.completeSender() || receiver == null || receiver.send()
+                        || !receiver.completeReceiver()) {
+                    log.warn("Onvolledige outbound action-binding in CPA {}: binding={} other={}",
+                        cpaId, sender.id(), sender.otherBindingId());
+                    continue;
+                }
+                if (!sender.service().equals(receiver.service())
+                    || !java.util.Objects.equals(sender.serviceType(), receiver.serviceType())
+                        || !sender.action().equals(receiver.action())) {
+                    log.warn("Inconsistente gekoppelde action-bindings in CPA {}: {} -> {}",
+                        cpaId, sender.id(), receiver.id());
+                    continue;
+                }
+                for (String channelId : sender.channelIds()) {
+                    String channelPartyId = channelOwners.get(channelId);
+                    if (channelPartyId == null) {
+                        log.warn("Onopgeloste ChannelId in outbound route van CPA {}: binding={} channel={}",
+                            cpaId, sender.id(), channelId);
+                        continue;
+                    }
+                    routes.add(CpaOutboundRouteEntity.builder()
+                        .cpaId(cpaId)
+                        .fromPartyId(sender.partyId())
+                        .toPartyId(receiver.partyId())
+                        .service(sender.service())
+                        .serviceType(sender.serviceType())
+                        .action(sender.action())
+                        .actionBindingId(sender.id())
+                        .fromRole(sender.role())
+                        .toRole(receiver.role())
+                        .channelPartyId(channelPartyId)
+                        .channelId(channelId)
+                        .build());
+                }
+            }
+            return routes;
+        } catch (Exception e) {
+            log.warn("Kon outbound routes niet uit CPA XML parsen: {}", e.getMessage());
+            return List.of();
+        }
+    }
+
+    private void collectActionBindings(Element serviceBinding, String direction, boolean send,
+            String partyId, String role, String service, String serviceType,
+            Map<String, ActionBinding> bindingsById, List<ActionBinding> sendBindings) {
+        for (Element capability : directChildren(serviceBinding, direction)) {
+            Element bindingElement = directChild(capability, "ThisPartyActionBinding");
+            if (bindingElement == null) {
+                continue;
+            }
+            Element otherElement = directChild(capability, "OtherPartyActionBinding");
+            String id = blankToNull(getLenientAttribute(bindingElement, "id"));
+            String action = blankToNull(getLenientAttribute(bindingElement, "action"));
+            String otherId = otherElement == null
+                ? null : blankToNull(otherElement.getTextContent().trim());
+            List<String> channelIds = directChildren(bindingElement, "ChannelId").stream()
+                .map(Element::getTextContent)
+                .map(String::trim)
+                .filter(value -> !value.isEmpty())
+                .toList();
+            ActionBinding binding = new ActionBinding(
+                id, partyId, role, service, serviceType, action, otherId, channelIds, send);
+            if (id != null) {
+                bindingsById.put(id, binding);
+            }
+            if (send) {
+                sendBindings.add(binding);
+            }
+        }
+    }
+
+    private List<Element> descendants(Element parent, String localName) {
+        NodeList nodes = parent.getElementsByTagNameNS("*", localName);
+        List<Element> elements = new ArrayList<>();
+        for (int i = 0; i < nodes.getLength(); i++) {
+            elements.add((Element) nodes.item(i));
+        }
+        return elements;
+    }
+
+    private List<Element> directChildren(Element parent, String localName) {
+        List<Element> elements = new ArrayList<>();
+        for (Node child = parent.getFirstChild(); child != null; child = child.getNextSibling()) {
+            if (child instanceof Element element && localName.equals(localName(element))) {
+                elements.add(element);
+            }
+        }
+        return elements;
+    }
+
+    private String localName(Element element) {
+        String localName = element.getLocalName();
+        if (localName != null) {
+            return localName;
+        }
+        String nodeName = element.getNodeName();
+        int separator = nodeName.indexOf(':');
+        return separator >= 0 ? nodeName.substring(separator + 1) : nodeName;
+    }
+
+    private Element directChild(Element parent, String localName) {
+        List<Element> children = directChildren(parent, localName);
+        return children.isEmpty() ? null : children.get(0);
+    }
+
+    private record ActionBinding(String id, String partyId, String role, String service,
+                                 String serviceType, String action, String otherBindingId,
+                                 List<String> channelIds, boolean send) {
+        private boolean completeSender() {
+            return id != null && partyId != null && role != null && service != null
+                && action != null && otherBindingId != null && !channelIds.isEmpty();
+        }
+
+        private boolean completeReceiver() {
+            return id != null && partyId != null && role != null && service != null
+                && action != null;
+        }
     }
 
     // ── Certificaat-extractie ────────────────────────────────────────────

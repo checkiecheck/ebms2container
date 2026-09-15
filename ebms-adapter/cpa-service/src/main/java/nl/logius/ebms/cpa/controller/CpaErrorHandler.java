@@ -30,9 +30,13 @@ public class CpaErrorHandler {
 
     @ExceptionHandler(EbmsException.class)
     public ProblemDetail handleEbmsException(EbmsException ex) {
-        boolean isConflict = ex.getErrorCode().contains("ALREADY_EXISTS");
-        ProblemDetail pd = ProblemDetail.forStatus(
-            isConflict ? HttpStatus.CONFLICT : HttpStatus.BAD_REQUEST);
+        boolean isConflict = ex.getErrorCode().contains("ALREADY_EXISTS")
+            || "ROUTE_AMBIGUOUS".equals(ex.getErrorCode());
+        boolean isNotFound = "ROUTE_NOT_FOUND".equals(ex.getErrorCode())
+            || "CHANNEL_NOT_FOUND".equals(ex.getErrorCode());
+        HttpStatus status = isConflict ? HttpStatus.CONFLICT
+            : isNotFound ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST;
+        ProblemDetail pd = ProblemDetail.forStatus(status);
         pd.setType(URI.create("urn:nl:logius:ebms:error:" + ex.getErrorCode().toLowerCase()));
         pd.setTitle(ex.getErrorCode());
         pd.setDetail(ex.getMessage());

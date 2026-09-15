@@ -55,6 +55,17 @@ public interface EbmsMessageRepository extends JpaRepository<EbmsMessageEntity, 
           AND m.direction = 'OUTBOUND'
           AND m.retryCount < :maxRetries
           AND (m.lastRetryAt IS NULL OR m.lastRetryAt < :retryBefore)
+          AND (m.errorMessage IS NULL OR (
+            m.errorMessage NOT LIKE '[CHANNEL_NOT_FOUND] %'
+            AND m.errorMessage NOT LIKE '[INVALID_HEADER] %'
+            AND m.errorMessage NOT LIKE '[CPA_NOT_FOUND] %'
+            AND m.errorMessage NOT LIKE '[ROUTE_NOT_FOUND] %'
+            AND m.errorMessage NOT LIKE '[ROUTE_AMBIGUOUS] %'
+            AND m.errorMessage NOT LIKE '[CPA_ROUTE_INVALID] %'
+            AND m.errorMessage NOT LIKE '[CPA_ROLE_MISMATCH] %'
+            AND m.errorMessage NOT LIKE '[SecurityFailure] %'
+            AND m.errorMessage NOT LIKE '[PARTNER_REJECTED] %'
+          ))
         """)
     List<EbmsMessageEntity> findMessagesForRetry(
         @Param("maxRetries") int maxRetries,

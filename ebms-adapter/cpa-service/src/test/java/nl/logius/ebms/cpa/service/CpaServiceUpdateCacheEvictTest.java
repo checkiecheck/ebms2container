@@ -4,6 +4,7 @@ import nl.logius.ebms.common.model.cpa.CpaDto;
 import nl.logius.ebms.cpa.entity.CpaEntity;
 import nl.logius.ebms.cpa.mapper.CpaMapper;
 import nl.logius.ebms.cpa.repository.CpaDeliveryChannelRepository;
+import nl.logius.ebms.cpa.repository.CpaOutboundRouteRepository;
 import nl.logius.ebms.cpa.repository.CpaPartyRepository;
 import nl.logius.ebms.cpa.repository.CpaRepository;
 import nl.logius.ebms.cpa.repository.PartnerCertificateRepository;
@@ -59,15 +60,17 @@ class CpaServiceUpdateCacheEvictTest {
 
         @Bean
         CpaService cpaService(CpaRepository r1, CpaPartyRepository r2,
-                              CpaDeliveryChannelRepository r3, PartnerCertificateRepository r4,
+                              CpaDeliveryChannelRepository r3, CpaOutboundRouteRepository r4,
+                              PartnerCertificateRepository r5,
                               CpaMapper mapper, CpaPartyXmlParser parser) {
-            return new CpaService(r1, r2, r3, r4, mapper, parser);
+            return new CpaService(r1, r2, r3, r4, r5, mapper, parser);
         }
     }
 
     @MockBean CpaRepository cpaRepository;
     @MockBean CpaPartyRepository partyRepository;
     @MockBean CpaDeliveryChannelRepository channelRepository;
+    @MockBean CpaOutboundRouteRepository routeRepository;
     @MockBean PartnerCertificateRepository certRepository;
     @MockBean CpaMapper cpaMapper;
     @MockBean CpaPartyXmlParser partyXmlParser;
@@ -99,7 +102,9 @@ class CpaServiceUpdateCacheEvictTest {
         lenient().when(partyXmlParser.parseStartDate(any())).thenReturn(null);
         lenient().when(partyXmlParser.parseEndDate(any())).thenReturn(null);
         lenient().when(partyXmlParser.parseCertificates(any(), any())).thenReturn(new ArrayList<>());
+        lenient().when(partyXmlParser.parseOutboundRoutes(any(), any())).thenReturn(new ArrayList<>());
         lenient().when(certRepository.findByCpaId(any())).thenReturn(new ArrayList<>());
+        lenient().when(routeRepository.findByCpaId(any())).thenReturn(new ArrayList<>());
 
         when(cpaRepository.findByCpaId(CPA_ID)).thenReturn(Optional.of(existing));
         when(cpaRepository.save(any(CpaEntity.class))).thenAnswer(inv -> inv.getArgument(0));

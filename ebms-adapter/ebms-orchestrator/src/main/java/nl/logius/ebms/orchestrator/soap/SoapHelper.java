@@ -232,8 +232,8 @@ public class SoapHelper {
             msgHeader.addAttribute(env.createName("mustUnderstand", "SOAP-ENV", SOAP_ENV_NS), "1");
             msgHeader.addAttribute(env.createName("version", "eb", EBXML_MSG_NS), "2.0");
 
-            addParties(msgHeader, env, "From", originalHeader.getTo());
-            addParties(msgHeader, env, "To", originalHeader.getFrom());
+            addParties(msgHeader, env, "From", originalHeader.getTo(), originalHeader.getToRole());
+            addParties(msgHeader, env, "To", originalHeader.getFrom(), originalHeader.getFromRole());
             addChild(msgHeader, "CPAId", EBXML_MSG_NS, originalHeader.getCpaId());
             addChild(msgHeader, "ConversationId", EBXML_MSG_NS, originalHeader.getConversationId());
 
@@ -268,16 +268,20 @@ public class SoapHelper {
     }
 
     private void addParties(SOAPElement parent, SOAPEnvelope env, String direction,
-                            List<PartyId> parties) throws SOAPException {
+                            List<PartyId> parties, String role) throws SOAPException {
         SOAPElement directionElement = parent.addChildElement(direction, "eb", EBXML_MSG_NS);
-        if (parties == null) return;
-        for (PartyId party : parties) {
-            SOAPElement partyElement = directionElement.addChildElement("PartyId", "eb", EBXML_MSG_NS);
-            if (party.getType() != null && !party.getType().isBlank()) {
-                partyElement.addAttribute(
-                    env.createName("type", "eb", EBXML_MSG_NS), party.getType());
+        if (parties != null) {
+            for (PartyId party : parties) {
+                SOAPElement partyElement = directionElement.addChildElement("PartyId", "eb", EBXML_MSG_NS);
+                if (party.getType() != null && !party.getType().isBlank()) {
+                    partyElement.addAttribute(
+                        env.createName("type", "eb", EBXML_MSG_NS), party.getType());
+                }
+                partyElement.addTextNode(party.getValue());
             }
-            partyElement.addTextNode(party.getValue());
+        }
+        if (role != null && !role.isBlank()) {
+            addChild(directionElement, "Role", EBXML_MSG_NS, role);
         }
     }
 

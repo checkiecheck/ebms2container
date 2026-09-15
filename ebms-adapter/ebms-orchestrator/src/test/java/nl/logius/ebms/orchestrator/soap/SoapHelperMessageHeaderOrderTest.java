@@ -46,13 +46,11 @@ class SoapHelperMessageHeaderOrderTest {
         assertThat(childNames(messageHeader.getElementsByTagNameNS(
             SoapHelper.EBXML_MSG_NS, "From").item(0)))
             .containsExactly("PartyId", "Role");
-        assertThat(messageHeader.getElementsByTagNameNS(SoapHelper.EBXML_MSG_NS, "From")
-            .item(0).getTextContent()).contains("sender", "Sender");
+        assertThat(roleText(messageHeader, "From")).isEqualTo("Sender");
         assertThat(childNames(messageHeader.getElementsByTagNameNS(
             SoapHelper.EBXML_MSG_NS, "To").item(0)))
             .containsExactly("PartyId", "Role");
-        assertThat(messageHeader.getElementsByTagNameNS(SoapHelper.EBXML_MSG_NS, "To")
-            .item(0).getTextContent()).contains("receiver", "Receiver");
+        assertThat(roleText(messageHeader, "To")).isEqualTo("Receiver");
     }
 
     @Test
@@ -67,6 +65,14 @@ class SoapHelperMessageHeaderOrderTest {
             .item(0).getTextContent()).contains("receiver");
         assertThat(messageHeader.getElementsByTagNameNS(SoapHelper.EBXML_MSG_NS, "To")
             .item(0).getTextContent()).contains("sender");
+        assertThat(childNames(messageHeader.getElementsByTagNameNS(
+            SoapHelper.EBXML_MSG_NS, "From").item(0)))
+            .containsExactly("PartyId", "Role");
+        assertThat(roleText(messageHeader, "From")).isEqualTo("Receiver");
+        assertThat(childNames(messageHeader.getElementsByTagNameNS(
+            SoapHelper.EBXML_MSG_NS, "To").item(0)))
+            .containsExactly("PartyId", "Role");
+        assertThat(roleText(messageHeader, "To")).isEqualTo("Sender");
 
         SOAPElement messageData = (SOAPElement) messageHeader
             .getElementsByTagNameNS(SoapHelper.EBXML_MSG_NS, "MessageData").item(0);
@@ -94,6 +100,14 @@ class SoapHelperMessageHeaderOrderTest {
 
         assertThat(childNames(messageHeader))
             .containsExactly("From", "To", "CPAId", "ConversationId", "Service", "Action", "MessageData");
+        assertThat(childNames(messageHeader.getElementsByTagNameNS(
+            SoapHelper.EBXML_MSG_NS, "From").item(0)))
+            .containsExactly("PartyId", "Role");
+        assertThat(roleText(messageHeader, "From")).isEqualTo("Receiver");
+        assertThat(childNames(messageHeader.getElementsByTagNameNS(
+            SoapHelper.EBXML_MSG_NS, "To").item(0)))
+            .containsExactly("PartyId", "Role");
+        assertThat(roleText(messageHeader, "To")).isEqualTo("Sender");
         assertThat(messageHeader.getElementsByTagNameNS(SoapHelper.EBXML_MSG_NS, "MessageInfo")
             .getLength()).isZero();
     }
@@ -104,6 +118,22 @@ class SoapHelperMessageHeaderOrderTest {
         String xml = soapToString(message);
 
         validateAgainstOfficialOasisSchema(xml);
+    }
+
+    @Test
+    void parseIncomingMessageHeaderWithoutOptionalRolesKeepsRolesNull() throws Exception {
+        EbxmlMessageHeader headerWithoutRoles = header();
+        headerWithoutRoles.setFromRole(null);
+        headerWithoutRoles.setToRole(null);
+        SOAPMessage incomingMessage = soapHelper.buildOutboundSoap(headerWithoutRoles, false);
+
+        EbxmlMessageHeader parsed = soapHelper.parseMessageHeader(incomingMessage.getSOAPHeader());
+
+        assertThat(parsed).isNotNull();
+        assertThat(parsed.getFrom()).extracting(PartyId::getValue).containsExactly("sender");
+        assertThat(parsed.getTo()).extracting(PartyId::getValue).containsExactly("receiver");
+        assertThat(parsed.getFromRole()).isNull();
+        assertThat(parsed.getToRole()).isNull();
     }
 
     private EbxmlMessageHeader header() {
@@ -135,12 +165,21 @@ class SoapHelperMessageHeaderOrderTest {
         return names;
     }
 
+    private String roleText(SOAPElement messageHeader, String direction) {
+        SOAPElement party = (SOAPElement) messageHeader
+            .getElementsByTagNameNS(SoapHelper.EBXML_MSG_NS, direction).item(0);
+        return party.getElementsByTagNameNS(SoapHelper.EBXML_MSG_NS, "Role")
+            .item(0).getTextContent();
+    }
+
     private void validateAgainstOfficialOasisSchema(String xml) throws Exception {
         URL schemaUrl = URI.create(
             "https://www.oasis-open.org/committees/ebxml-msg/schema/msg-header-2_0.xsd")
             .toURL();
 
         SchemaFactory factory = SchemaFactory.newInstance(XMLConstants.W3C_XML_SCHEMA_NS_URI);
+        factory.setFeature(
+            "http://apache.org/xml/features/validation/schema-full-checking", false);
         factory.setResourceResolver(new LSResourceResolver() {
             @Override
             public LSInput resolveResource(String type, String namespaceURI, String publicId,

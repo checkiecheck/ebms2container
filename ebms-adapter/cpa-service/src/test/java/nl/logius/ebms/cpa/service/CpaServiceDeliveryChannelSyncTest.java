@@ -5,6 +5,7 @@ import nl.logius.ebms.cpa.entity.CpaDeliveryChannelEntity;
 import nl.logius.ebms.cpa.entity.CpaEntity;
 import nl.logius.ebms.cpa.mapper.CpaMapper;
 import nl.logius.ebms.cpa.repository.CpaDeliveryChannelRepository;
+import nl.logius.ebms.cpa.repository.CpaOutboundRouteRepository;
 import nl.logius.ebms.cpa.repository.CpaPartyRepository;
 import nl.logius.ebms.cpa.repository.CpaRepository;
 import nl.logius.ebms.cpa.repository.PartnerCertificateRepository;
@@ -42,6 +43,7 @@ class CpaServiceDeliveryChannelSyncTest {
     @Mock CpaRepository cpaRepository;
     @Mock CpaPartyRepository partyRepository;
     @Mock CpaDeliveryChannelRepository channelRepository;
+    @Mock CpaOutboundRouteRepository routeRepository;
     @Mock PartnerCertificateRepository certRepository;
     @Mock CpaMapper cpaMapper;
     @Mock CpaPartyXmlParser partyXmlParser;
@@ -64,6 +66,8 @@ class CpaServiceDeliveryChannelSyncTest {
         lenient().when(partyXmlParser.parseStartDate(any())).thenReturn(null);
         lenient().when(partyXmlParser.parseEndDate(any())).thenReturn(null);
         lenient().when(partyXmlParser.parseCertificates(anyString(), any())).thenReturn(List.of());
+        lenient().when(partyXmlParser.parseOutboundRoutes(anyString(), any())).thenReturn(List.of());
+        lenient().when(routeRepository.findByCpaId(anyString())).thenReturn(List.of());
     }
 
     private CpaDeliveryChannelEntity channel(String party, String channelId, String dk, String url) {

@@ -5,6 +5,7 @@ spring:
     type: caffeine
     cache-names:
       - outbound-channel
+      - outbound-route
     caffeine:
       spec: maximumSize=500,expireAfterWrite=300s
 

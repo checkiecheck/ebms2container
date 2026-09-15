@@ -30,6 +30,7 @@ public record MessageDto(
     String payloadContentType,
     String payloadRef,
     String rawSoapXml,
+    String errorMessage,
     int duplicateCount,
     Instant lastDuplicateAt
 ) {
@@ -53,6 +54,7 @@ public record MessageDto(
             e.getPayloadContentType(),
             e.getPayloadRef(),
             e.getRawSoapXml(),
+            e.getErrorMessage(),
             e.getDuplicateCount(),
             e.getLastDuplicateAt()
         );

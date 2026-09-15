@@ -8,6 +8,7 @@ import nl.logius.ebms.cpa.service.CpaService;
 import nl.logius.ebms.common.model.cpa.CpaDto;
 import nl.logius.ebms.common.model.cpa.DeliveryChannelDto;
 import nl.logius.ebms.common.model.cpa.PartyInfoDto;
+import nl.logius.ebms.common.model.cpa.OutboundRouteDto;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -111,6 +112,20 @@ public class CpaController {
             @PathVariable String cpaId,
             @PathVariable String partyId) {
         return ResponseEntity.ok(cpaService.findDeliveryChannel(cpaId, partyId));
+    }
+
+    @GetMapping("/{cpaId}/outbound-route")
+    public ResponseEntity<OutboundRouteDto> findOutboundRoute(
+            @PathVariable String cpaId,
+            @RequestParam String fromPartyId,
+            @RequestParam String toPartyId,
+            @RequestParam String service,
+            @RequestParam(required = false) String serviceType,
+            @RequestParam String action,
+            @RequestParam(required = false) String fromRole,
+            @RequestParam(required = false) String toRole) {
+        return ResponseEntity.ok(cpaService.findOutboundRoute(
+            cpaId, fromPartyId, toPartyId, service, serviceType, action, fromRole, toRole));
     }
 
     /**

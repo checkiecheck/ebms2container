@@ -8,6 +8,7 @@ import nl.logius.ebms.common.exception.EbmsException;
 import nl.logius.ebms.common.model.amqp.AuditEvent;
 import nl.logius.ebms.common.model.amqp.EbmsOutboundMessage;
 import nl.logius.ebms.common.model.cpa.DeliveryChannelDto;
+import nl.logius.ebms.common.model.cpa.OutboundRouteDto;
 import nl.logius.ebms.common.model.ebxml.EbxmlMessageHeader;
 import nl.logius.ebms.common.model.ebxml.EbxmlProfile;
 import nl.logius.ebms.orchestrator.config.RabbitMqConfig;
@@ -40,6 +41,10 @@ public class OutboundMessageService {
             "CHANNEL_NOT_FOUND",
             "INVALID_HEADER",
             "CPA_NOT_FOUND",
+            "ROUTE_NOT_FOUND",
+            "ROUTE_AMBIGUOUS",
+            "CPA_ROUTE_INVALID",
+            "CPA_ROLE_MISMATCH",
             // O-5: signing/encryptie-fouten (XmlSecurityException) zijn per definitie niet
             // herstelbaar door opnieuw te proberen (bv. onbekende key-alias) - zonder deze regel
             // requeue't zo'n permanente fout oneindig i.p.v. naar de DLQ te gaan.
@@ -89,10 +94,17 @@ public class OutboundMessageService {
 
         try {
             String cpaId = header.getCpaId();
+            String fromPartyId = extractFromPartyId(header);
             String toPartyId = extractToPartyId(header);
+            String service = extractService(header);
+            String action = requireHeaderValue("Action", header.getAction());
 
-            // ── 1. Afleverkanaal ophalen (gecached via CpaChannelCacheService) ─
-            DeliveryChannelDto channel = cpaChannelCacheService.getChannel(cpaId, toPartyId);
+            // ── 1. Volledige CPA-route ophalen en rollen toepassen ─────────
+            OutboundRouteDto route = cpaChannelCacheService.getOutboundRoute(
+                cpaId, fromPartyId, toPartyId, service, header.getService().getType(), action,
+                header.getFromRole(), header.getToRole());
+            applyCpaRoles(header, route);
+            DeliveryChannelDto channel = route.getChannel();
             EbxmlProfile profile = EbxmlProfile.fromCode(channel.getDkProfile());
             boolean requireAck = profile.hasReliableMessaging();
 
@@ -141,7 +153,8 @@ public class OutboundMessageService {
             log.error("[OUTBOUND] EbmsException: messageId={} code={} msg={}",
                 messageId, e.getErrorCode(), e.getMessage());
 
-            trackingService.markFailed(messageId, e.getErrorCode() + ": " + e.getMessage());
+            trackingService.markFailed(messageId,
+                "[" + e.getErrorCode() + "] " + e.getMessage());
 
             boolean retryable = !NON_RETRYABLE_ERROR_CODES.contains(e.getErrorCode());
             if (retryable) {
@@ -184,6 +197,44 @@ public class OutboundMessageService {
             return header.getTo().get(0).getValue();
         }
         throw new EbmsException("INVALID_HEADER", "To-partij ontbreekt in ebXML MessageHeader");
+    }
+
+    private String extractFromPartyId(EbxmlMessageHeader header) {
+        if (header.getFrom() != null && !header.getFrom().isEmpty()) {
+            return requireHeaderValue("From/PartyId", header.getFrom().get(0).getValue());
+        }
+        throw new EbmsException("INVALID_HEADER", "From-partij ontbreekt in ebXML MessageHeader");
+    }
+
+    private String extractService(EbxmlMessageHeader header) {
+        if (header.getService() == null) {
+            throw new EbmsException("INVALID_HEADER", "Service ontbreekt in ebXML MessageHeader");
+        }
+        return requireHeaderValue("Service", header.getService().getValue());
+    }
+
+    private String requireHeaderValue(String name, String value) {
+        if (value == null || value.isBlank()) {
+            throw new EbmsException("INVALID_HEADER", name + " ontbreekt in ebXML MessageHeader");
+        }
+        return value;
+    }
+
+    private void applyCpaRoles(EbxmlMessageHeader header, OutboundRouteDto route) {
+        header.setFromRole(resolveRole("From/Role", header.getFromRole(), route.getFromRole()));
+        header.setToRole(resolveRole("To/Role", header.getToRole(), route.getToRole()));
+    }
+
+    private String resolveRole(String location, String suppliedRole, String cpaRole) {
+        if (cpaRole == null || cpaRole.isBlank()) {
+            throw new EbmsException("CPA_ROUTE_INVALID", location + " ontbreekt in de CPA-route");
+        }
+        if (suppliedRole != null && !suppliedRole.isBlank() && !suppliedRole.equals(cpaRole)) {
+            throw new EbmsException("CPA_ROLE_MISMATCH",
+                location + " komt niet exact overeen met de CPA: ontvangen='" + suppliedRole
+                    + "', verwacht='" + cpaRole + "'");
+        }
+        return cpaRole;
     }
 
     private void publishAudit(AuditEvent event) {

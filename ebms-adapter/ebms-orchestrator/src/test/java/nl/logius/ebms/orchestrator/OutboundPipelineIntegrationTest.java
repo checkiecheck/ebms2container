@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import nl.logius.ebms.common.model.amqp.AuditEvent;
 import nl.logius.ebms.common.model.amqp.EbmsOutboundMessage;
 import nl.logius.ebms.common.model.cpa.DeliveryChannelDto;
+import nl.logius.ebms.common.model.cpa.OutboundRouteDto;
 import nl.logius.ebms.common.model.ebxml.*;
 import nl.logius.ebms.orchestrator.config.RabbitMqConfig;
 import nl.logius.ebms.orchestrator.entity.EbmsMessageEntity;
@@ -408,7 +409,19 @@ class OutboundPipelineIntegrationTest {
             .endpointUrl(ENDPOINT)
             .persistDuration(86_400) // 24 uur TTL
             .build();
-        when(cpaChannelCacheService.getChannel(eq(CPA_ID), eq(TO_OIN))).thenReturn(channel);
+        when(cpaChannelCacheService.getOutboundRoute(
+            eq(CPA_ID), eq(FROM_OIN), eq(TO_OIN), eq("urn:test:service"), isNull(), eq("TestAction"),
+            eq("aanbieder"), eq("afnemer")))
+            .thenReturn(OutboundRouteDto.builder()
+                .cpaId(CPA_ID)
+                .fromPartyId(FROM_OIN)
+                .toPartyId(TO_OIN)
+                .service("urn:test:service")
+                .action("TestAction")
+                .fromRole("aanbieder")
+                .toRole("afnemer")
+                .channel(channel)
+                .build());
     }
 
     /**

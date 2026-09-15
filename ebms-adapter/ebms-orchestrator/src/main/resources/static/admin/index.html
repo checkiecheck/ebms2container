@@ -258,6 +258,15 @@
       return d.toLocaleString('nl-NL');
     }
 
+    function escapeHtml(value) {
+      return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
     async function loadMessages(page = 0) {
       try {
         const res = await fetch(`${API_URL}?page=${page}&size=${PAGE_SIZE}`);
@@ -314,6 +323,7 @@
         ['Action', m.action],
         ['Direction', m.direction],
         ['Status', m.status],
+        ['Foutreden', m.errorMessage || '-'],
         ['Retry count', m.retryCount],
         ['Last retry at', fmtTime(m.lastRetryAt)],
         ['Ack requested', m.ackRequested],
@@ -324,12 +334,12 @@
       document.getElementById('detailsBody').innerHTML = `
         <dl class="grid grid-cols-2 gap-2">
           ${rows.map(([k, v]) => `
-            <dt class="text-slate-500">${k}</dt><dd class="text-slate-200 break-all">${v}</dd>
+            <dt class="text-slate-500">${escapeHtml(k)}</dt><dd class="text-slate-200 break-all">${escapeHtml(v)}</dd>
           `).join('')}
         </dl>
         <div>
           <p class="text-slate-500 mb-1 mt-3">Raw SOAP XML</p>
-          <pre class="bg-slate-950 border border-slate-800 rounded p-3 text-xs overflow-x-auto whitespace-pre-wrap break-all max-h-64" data-testid="raw-soap-xml">${(m.rawSoapXml || '-').replace(/</g, '&lt;')}</pre>
+          <pre class="bg-slate-950 border border-slate-800 rounded p-3 text-xs overflow-x-auto whitespace-pre-wrap break-all max-h-64" data-testid="raw-soap-xml">${escapeHtml(m.rawSoapXml || '-')}</pre>
         </div>
       `;
       document.getElementById('detailsModal').classList.remove('hidden');

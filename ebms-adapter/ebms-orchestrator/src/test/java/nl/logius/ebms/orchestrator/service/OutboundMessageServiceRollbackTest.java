@@ -4,6 +4,7 @@ import com.rabbitmq.client.Channel;
 import nl.logius.ebms.common.exception.EbmsException;
 import nl.logius.ebms.common.model.amqp.EbmsOutboundMessage;
 import nl.logius.ebms.common.model.cpa.DeliveryChannelDto;
+import nl.logius.ebms.common.model.cpa.OutboundRouteDto;
 import nl.logius.ebms.common.model.ebxml.EbxmlMessageHeader;
 import nl.logius.ebms.common.model.ebxml.MessageInfo;
 import nl.logius.ebms.common.model.ebxml.PartyId;
@@ -99,7 +100,13 @@ class OutboundMessageServiceRollbackTest {
             .dkProfile("osb-be")
             .persistDuration(3600)
             .build();
-        when(cpaChannelCacheService.getChannel(anyString(), anyString())).thenReturn(channel);
+        when(cpaChannelCacheService.getOutboundRoute(
+            anyString(), anyString(), anyString(), anyString(), any(), anyString(), any(), any()))
+            .thenReturn(OutboundRouteDto.builder()
+                .fromRole("Sender")
+                .toRole("Receiver")
+                .channel(channel)
+                .build());
 
         SOAPMessage soapMock = mock(SOAPMessage.class);
         when(soapHelper.buildOutboundSoap(any(), anyBoolean())).thenReturn(soapMock);
@@ -171,6 +178,45 @@ class OutboundMessageServiceRollbackTest {
 
         verify(amqpChannel, times(1)).basicAck(anyLong(), anyBoolean());
         verify(amqpChannel, never()).basicNack(anyLong(), anyBoolean(), anyBoolean());
+    }
+
+    @Test
+    void missingRoles_areFilledFromExactCpaRouteBeforeSoapCreation() throws Exception {
+        outboundMessage.getHeader().setFromRole(null);
+        outboundMessage.getHeader().setToRole(null);
+
+        service.handleOutboundMessage(outboundMessage, amqpChannel, 790L);
+
+        assertThat(outboundMessage.getHeader().getFromRole()).isEqualTo("Sender");
+        assertThat(outboundMessage.getHeader().getToRole()).isEqualTo("Receiver");
+        verify(soapHelper).buildOutboundSoap(outboundMessage.getHeader(), false);
+    }
+
+    @Test
+    void roleWithDifferentCase_isRejectedBeforeSoapCreation() throws Exception {
+        outboundMessage.getHeader().setFromRole("sender");
+
+        service.handleOutboundMessage(outboundMessage, amqpChannel, 791L);
+
+        verify(trackingService).markFailed(eq("msg-42"),
+            org.mockito.ArgumentMatchers.startsWith("[CPA_ROLE_MISMATCH] "));
+        verify(soapHelper, never()).buildOutboundSoap(any(), anyBoolean());
+        verify(amqpChannel).basicNack(791L, false, false);
+    }
+
+    @Test
+    void routeNotFound_persistsExactReasonBeforeRejectingMessage() throws Exception {
+        when(cpaChannelCacheService.getOutboundRoute(
+            anyString(), anyString(), anyString(), anyString(), any(), anyString(), any(), any()))
+            .thenThrow(new EbmsException("ROUTE_NOT_FOUND",
+                "Geen outbound CPA-route voor service=urn:test:service action=send"));
+
+        service.handleOutboundMessage(outboundMessage, amqpChannel, 792L);
+
+        verify(trackingService).markFailed("msg-42",
+            "[ROUTE_NOT_FOUND] Geen outbound CPA-route voor service=urn:test:service action=send");
+        verify(soapHelper, never()).buildOutboundSoap(any(), anyBoolean());
+        verify(amqpChannel).basicNack(792L, false, false);
     }
 
     // ─────────────────────────────────────────────────────────────────────────

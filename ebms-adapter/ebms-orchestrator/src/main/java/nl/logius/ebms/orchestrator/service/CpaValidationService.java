@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import nl.logius.ebms.common.exception.EbmsException;
 import nl.logius.ebms.common.model.cpa.CpaDto;
 import nl.logius.ebms.common.model.cpa.DeliveryChannelDto;
+import nl.logius.ebms.common.model.cpa.OutboundRouteDto;
 import nl.logius.ebms.common.model.cpa.PartnerCertificateDto;
 import nl.logius.ebms.common.model.cpa.PartyInfoDto;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -135,6 +136,53 @@ public class CpaValidationService {
             log.error("[CPA] cpa-service onbereikbaar bij kanaal-lookup: {}", e.getMessage());
             throw new EbmsException("CPA_SERVICE_UNAVAILABLE",
                 "cpa-service onbereikbaar voor kanaal-lookup: " + e.getMessage());
+        }
+    }
+
+    public OutboundRouteDto getOutboundRoute(String cpaId, String fromPartyId,
+            String toPartyId, String service, String serviceType, String action,
+            String fromRole, String toRole) {
+        log.debug("[CPA] Outbound route opzoeken: cpaId={} from={} to={} service={} action={}",
+            cpaId, fromPartyId, toPartyId, service, action);
+        try {
+            OutboundRouteDto route = cpaRestClient.get()
+                .uri(uriBuilder -> uriBuilder
+                    .path("/api/cpa/{cpaId}/outbound-route")
+                    .queryParam("fromPartyId", "{fromPartyId}")
+                    .queryParam("toPartyId", "{toPartyId}")
+                    .queryParam("service", "{service}")
+                    .queryParam("serviceType", "{serviceType}")
+                    .queryParam("action", "{action}")
+                    .queryParam("fromRole", "{fromRole}")
+                    .queryParam("toRole", "{toRole}")
+                    .build(cpaId, fromPartyId, toPartyId, service,
+                        serviceType == null ? "" : serviceType, action,
+                        fromRole == null ? "" : fromRole,
+                        toRole == null ? "" : toRole))
+                .retrieve()
+                .body(OutboundRouteDto.class);
+            if (route == null || route.getChannel() == null
+                    || route.getChannel().getEndpointUrl() == null) {
+                throw new EbmsException("ROUTE_NOT_FOUND",
+                    "CPA-service gaf geen volledige outbound route terug voor CPA=" + cpaId);
+            }
+            return route;
+        } catch (HttpClientErrorException.NotFound e) {
+            throw new EbmsException("ROUTE_NOT_FOUND",
+                "Geen outbound CPA-route gevonden: " + e.getResponseBodyAsString());
+        } catch (HttpClientErrorException.Conflict e) {
+            throw new EbmsException("ROUTE_AMBIGUOUS",
+                "Outbound CPA-route is niet eenduidig: " + e.getResponseBodyAsString());
+        } catch (HttpClientErrorException e) {
+            throw new EbmsException("CPA_ROUTE_INVALID",
+                "CPA-route kon niet worden bepaald (" + e.getStatusCode() + "): "
+                    + e.getResponseBodyAsString());
+        } catch (EbmsException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("[CPA] cpa-service onbereikbaar bij outbound route-lookup: {}", e.getMessage());
+            throw new EbmsException("CPA_SERVICE_UNAVAILABLE",
+                "cpa-service onbereikbaar voor outbound route-lookup: " + e.getMessage());
         }
     }
 

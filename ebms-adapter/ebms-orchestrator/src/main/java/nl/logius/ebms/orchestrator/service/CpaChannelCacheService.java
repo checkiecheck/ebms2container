@@ -2,6 +2,7 @@ package nl.logius.ebms.orchestrator.service;
 
 import lombok.extern.slf4j.Slf4j;
 import nl.logius.ebms.common.model.cpa.DeliveryChannelDto;
+import nl.logius.ebms.common.model.cpa.OutboundRouteDto;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
@@ -38,5 +39,15 @@ public class CpaChannelCacheService {
     public DeliveryChannelDto getChannel(String cpaId, String toPartyId) {
         log.debug("[CACHE MISS] Afleverkanaal opzoeken: cpaId={} toPartyId={}", cpaId, toPartyId);
         return cpaValidationService.getDeliveryChannel(cpaId, toPartyId);
+    }
+
+    @Cacheable("outbound-route")
+    public OutboundRouteDto getOutboundRoute(String cpaId, String fromPartyId,
+            String toPartyId, String service, String serviceType, String action,
+            String fromRole, String toRole) {
+        log.debug("[CACHE MISS] Outbound route opzoeken: cpaId={} from={} to={} service={} action={}",
+            cpaId, fromPartyId, toPartyId, service, action);
+        return cpaValidationService.getOutboundRoute(
+            cpaId, fromPartyId, toPartyId, service, serviceType, action, fromRole, toRole);
     }
 }

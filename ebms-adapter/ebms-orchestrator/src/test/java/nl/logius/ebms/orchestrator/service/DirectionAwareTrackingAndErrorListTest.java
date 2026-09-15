@@ -6,6 +6,7 @@ import nl.logius.ebms.common.exception.EbmsException;
 import nl.logius.ebms.common.exception.XmlSecurityException;
 import nl.logius.ebms.common.model.amqp.EbmsOutboundMessage;
 import nl.logius.ebms.common.model.cpa.DeliveryChannelDto;
+import nl.logius.ebms.common.model.cpa.OutboundRouteDto;
 import nl.logius.ebms.common.model.ebxml.EbxmlMessageHeader;
 import nl.logius.ebms.common.model.ebxml.MessageInfo;
 import nl.logius.ebms.common.model.ebxml.PartyId;
@@ -216,6 +217,23 @@ class DirectionAwareTrackingAndErrorListTest {
             verify(repo).findByMessageIdAndDirection(MID, MessageDirection.OUTBOUND);
             verify(repo, never()).findByMessageIdAndDirection(MID, MessageDirection.INBOUND);
         }
+
+        @Test
+        void markFailed_persistsExactFunctionalErrorForAdminUi() {
+            EbmsMessageEntity entity = EbmsMessageEntity.builder()
+                .messageId(MID)
+                .direction(MessageDirection.OUTBOUND)
+                .build();
+            String reason = "[CPA_ROLE_MISMATCH] Given role 'Consumer' does not match CPA role 'Sender'";
+            when(repo.findByMessageIdAndDirection(MID, MessageDirection.OUTBOUND))
+                .thenReturn(Optional.of(entity));
+
+            outboundTracking.markFailed(MID, reason);
+
+            assertThat(entity.getStatus()).isEqualTo(MessageStatus.FAILED);
+            assertThat(entity.getErrorMessage()).isEqualTo(reason);
+            verify(repo).save(entity);
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -260,7 +278,10 @@ class DirectionAwareTrackingAndErrorListTest {
             DeliveryChannelDto channel = DeliveryChannelDto.builder()
                 .endpointUrl("https://partner.example/ebms").dkProfile(dkProfile).persistDuration(3600)
                 .build();
-            when(cpaChannelCacheService.getChannel(anyString(), anyString())).thenReturn(channel);
+            when(cpaChannelCacheService.getOutboundRoute(
+                anyString(), anyString(), anyString(), anyString(), any(), anyString(), any(), any()))
+                .thenReturn(OutboundRouteDto.builder()
+                    .fromRole("Sender").toRole("Receiver").channel(channel).build());
             SOAPMessage soapMock = mock(SOAPMessage.class);
             when(soapHelper.buildOutboundSoap(any(), anyBoolean())).thenReturn(soapMock);
             when(soapHelper.soapToString(any())).thenReturn("<soap:Envelope/>");

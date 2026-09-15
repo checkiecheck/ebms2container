@@ -5,9 +5,11 @@ import lombok.extern.slf4j.Slf4j;
 import nl.logius.ebms.cpa.entity.CpaEntity;
 import nl.logius.ebms.cpa.entity.CpaPartyEntity;
 import nl.logius.ebms.cpa.entity.CpaDeliveryChannelEntity;
+import nl.logius.ebms.cpa.entity.CpaOutboundRouteEntity;
 import nl.logius.ebms.cpa.entity.PartnerCertificateEntity;
 import nl.logius.ebms.cpa.mapper.CpaMapper;
 import nl.logius.ebms.cpa.repository.CpaDeliveryChannelRepository;
+import nl.logius.ebms.cpa.repository.CpaOutboundRouteRepository;
 import nl.logius.ebms.cpa.repository.CpaPartyRepository;
 import nl.logius.ebms.cpa.repository.CpaRepository;
 import nl.logius.ebms.cpa.repository.PartnerCertificateRepository;
@@ -16,6 +18,7 @@ import nl.logius.ebms.common.exception.CpaNotFoundException;
 import nl.logius.ebms.common.exception.EbmsException;
 import nl.logius.ebms.common.model.cpa.CpaDto;
 import nl.logius.ebms.common.model.cpa.DeliveryChannelDto;
+import nl.logius.ebms.common.model.cpa.OutboundRouteDto;
 import nl.logius.ebms.common.model.cpa.PartyInfoDto;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
@@ -46,6 +49,7 @@ public class CpaService {
     private final CpaRepository              cpaRepository;
     private final CpaPartyRepository         partyRepository;
     private final CpaDeliveryChannelRepository channelRepository;
+    private final CpaOutboundRouteRepository routeRepository;
     private final PartnerCertificateRepository certRepository;
     private final CpaMapper                  cpaMapper;
     private final CpaPartyXmlParser           partyXmlParser;
@@ -105,6 +109,66 @@ public class CpaService {
     @Transactional(readOnly = true)
     public List<DeliveryChannelDto> findDeliveryChannels(String cpaId) {
         return cpaMapper.toChannelDtoList(channelRepository.findByCpaId(cpaId));
+    }
+
+    @Transactional
+    public OutboundRouteDto findOutboundRoute(String cpaId, String fromPartyId,
+            String toPartyId, String service, String serviceType, String action,
+            String fromRole, String toRole) {
+        requireRouteValue("fromPartyId", fromPartyId);
+        requireRouteValue("toPartyId", toPartyId);
+        requireRouteValue("service", service);
+        requireRouteValue("action", action);
+
+        List<CpaOutboundRouteEntity> matches = findMatchingRoutes(
+            cpaId, fromPartyId, toPartyId, service, serviceType, action, fromRole, toRole);
+        if (matches.isEmpty() && routeRepository.findByCpaId(cpaId).isEmpty()) {
+            CpaEntity cpa = cpaRepository.findByCpaIdForUpdate(cpaId)
+                .orElseThrow(() -> new CpaNotFoundException(cpaId));
+            List<CpaOutboundRouteEntity> existingRoutes = routeRepository.findByCpaId(cpaId);
+            if (existingRoutes.isEmpty()) {
+                List<CpaOutboundRouteEntity> parsed = partyXmlParser.parseOutboundRoutes(
+                    cpa.getCpaXml(), cpaId);
+                if (!parsed.isEmpty()) {
+                    routeRepository.saveAll(parsed);
+                    existingRoutes = parsed;
+                }
+            }
+            matches = existingRoutes.stream()
+                .filter(route -> routeMatches(
+                    route, fromPartyId, toPartyId, service, serviceType, action, fromRole, toRole))
+                .toList();
+        }
+        if (matches.isEmpty()) {
+            throw new EbmsException("ROUTE_NOT_FOUND",
+                "Geen outbound CPA-route gevonden voor CPA=" + cpaId
+                    + ", fromPartyId=" + fromPartyId + ", toPartyId=" + toPartyId
+                    + ", service=" + service + ", action=" + action);
+        }
+        if (matches.size() > 1) {
+            throw new EbmsException("ROUTE_AMBIGUOUS",
+                "Meerdere outbound CPA-routes gevonden voor CPA=" + cpaId
+                    + ", fromPartyId=" + fromPartyId + ", toPartyId=" + toPartyId
+                    + ", service=" + service + ", action=" + action);
+        }
+
+        CpaOutboundRouteEntity route = matches.get(0);
+        CpaDeliveryChannelEntity channel = channelRepository
+            .findByCpaIdAndPartyIdAndChannelId(
+                cpaId, route.getChannelPartyId(), route.getChannelId())
+            .orElseThrow(() -> new EbmsException("CHANNEL_NOT_FOUND",
+                "Kanaal " + route.getChannelId() + " van outbound CPA-route niet gevonden"));
+        return OutboundRouteDto.builder()
+            .cpaId(cpaId)
+            .fromPartyId(route.getFromPartyId())
+            .toPartyId(route.getToPartyId())
+            .service(route.getService())
+            .serviceType(route.getServiceType())
+            .action(route.getAction())
+            .fromRole(route.getFromRole())
+            .toRole(route.getToRole())
+            .channel(cpaMapper.toChannelDto(channel))
+            .build();
     }
 
     /**
@@ -169,6 +233,7 @@ public class CpaService {
         CpaEntity saved = cpaRepository.save(entity);
         syncCertificates(cpaId, dto.getCpaXml());
         syncDeliveryChannels(cpaId, dto.getCpaXml());
+        syncOutboundRoutes(cpaId, dto.getCpaXml());
         log.info("CPA aangemaakt: {} ({} partij(en) geëxtraheerd uit XML)",
             saved.getCpaId(), parsedParties.size());
         return enrichWithDetails(cpaMapper.toDto(saved), saved);
@@ -233,6 +298,7 @@ public class CpaService {
         CpaEntity saved = cpaRepository.save(entity);
         syncCertificates(cpaIdFromXml, dto.getCpaXml());
         syncDeliveryChannels(cpaIdFromXml, dto.getCpaXml());
+        syncOutboundRoutes(cpaIdFromXml, dto.getCpaXml());
         log.info("CPA overschreven: {} ({} partij(en) gesynchroniseerd uit XML)",
             cpaIdFromXml, parsedParties.size());
         return enrichWithDetails(cpaMapper.toDto(saved), saved);
@@ -419,6 +485,48 @@ public class CpaService {
 
     private String channelKey(CpaDeliveryChannelEntity e) {
         return e.getPartyId() + "::" + e.getChannelId();
+    }
+
+    private void syncOutboundRoutes(String cpaId, String cpaXml) {
+        List<CpaOutboundRouteEntity> parsed = partyXmlParser.parseOutboundRoutes(cpaXml, cpaId);
+        List<CpaOutboundRouteEntity> existing = routeRepository.findByCpaId(cpaId);
+        if (!existing.isEmpty()) {
+            routeRepository.deleteAllInBatch(existing);
+            routeRepository.flush();
+        }
+        if (!parsed.isEmpty()) {
+            routeRepository.saveAll(parsed);
+        }
+    }
+
+    private List<CpaOutboundRouteEntity> findMatchingRoutes(String cpaId, String fromPartyId,
+            String toPartyId, String service, String serviceType, String action,
+            String fromRole, String toRole) {
+        return routeRepository.findByCpaIdAndFromPartyIdAndToPartyId(
+                cpaId, fromPartyId, toPartyId).stream()
+            .filter(route -> routeMatches(
+                route, fromPartyId, toPartyId, service, serviceType, action, fromRole, toRole))
+            .toList();
+    }
+
+    private boolean routeMatches(CpaOutboundRouteEntity route, String fromPartyId,
+            String toPartyId, String service, String serviceType, String action,
+            String fromRole, String toRole) {
+        return fromPartyId.equals(route.getFromPartyId())
+            && toPartyId.equals(route.getToPartyId())
+            && service.equals(route.getService())
+            && (serviceType == null || serviceType.isBlank()
+                ? route.getServiceType() == null || route.getServiceType().isBlank()
+                : serviceType.equals(route.getServiceType()))
+            && action.equals(route.getAction())
+            && (fromRole == null || fromRole.isBlank() || fromRole.equals(route.getFromRole()))
+            && (toRole == null || toRole.isBlank() || toRole.equals(route.getToRole()));
+    }
+
+    private void requireRouteValue(String name, String value) {
+        if (value == null || value.isBlank()) {
+            throw new EbmsException("INVALID_ROUTE_REQUEST", name + " ontbreekt voor CPA-route lookup");
+        }
     }
 
     private CpaDto enrichWithDetails(CpaDto dto, CpaEntity entity) {

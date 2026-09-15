@@ -61,8 +61,8 @@ public class PingEchoService {
                 env.createName("version", "eb", SoapHelper.EBXML_MSG_NS), "2.0");
 
             // From / To worden omgedraaid (wij zijn nu de verzender)
-            addPartyElement(msgHeader, env, "From", pingHeader.getTo());
-            addPartyElement(msgHeader, env, "To",   pingHeader.getFrom());
+            addPartyElement(msgHeader, env, "From", pingHeader.getTo(), pingHeader.getToRole());
+            addPartyElement(msgHeader, env, "To", pingHeader.getFrom(), pingHeader.getFromRole());
 
             addText(msgHeader, "CPAId",          pingHeader.getCpaId());
             addText(msgHeader, "ConversationId", pingHeader.getConversationId());
@@ -89,8 +89,8 @@ public class PingEchoService {
 
     // ── Helpers ───────────────────────────────────────────────────────────
 
-    private void addPartyElement(SOAPElement parent, SOAPEnvelope env,
-                                  String direction, List<PartyId> parties)
+    private void addPartyElement(SOAPElement parent, SOAPEnvelope env, String direction,
+                                 List<PartyId> parties, String role)
             throws SOAPException {
         SOAPElement dirEl = parent.addChildElement(direction, "eb", SoapHelper.EBXML_MSG_NS);
         for (PartyId pid : parties) {
@@ -100,6 +100,9 @@ public class PingEchoService {
                 partyIdEl.addAttribute(
                     env.createName("type", "eb", SoapHelper.EBXML_MSG_NS), pid.getType());
             }
+        }
+        if (role != null && !role.isBlank()) {
+            addText(dirEl, "Role", role);
         }
     }
 

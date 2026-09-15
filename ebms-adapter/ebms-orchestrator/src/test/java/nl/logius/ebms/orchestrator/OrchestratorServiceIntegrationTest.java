@@ -195,6 +195,23 @@ class OrchestratorServiceIntegrationTest {
     }
 
     @Test
+    void findMessagesForRetry_terminalRoleMismatchIsNeverCandidate() {
+        EbmsMessageEntity rejected = buildMessage("msg-role-mismatch-001");
+        rejected.setDirection(MessageDirection.OUTBOUND);
+        rejected.setStatus(MessageStatus.FAILED);
+        rejected.setRetryCount((short) 0);
+        rejected.setErrorMessage("[CPA_ROLE_MISMATCH] From/Role wijkt af van CPA");
+        messageRepository.save(rejected);
+
+        List<EbmsMessageEntity> candidates = messageRepository.findMessagesForRetry(
+            3, Instant.now());
+
+        assertThat(candidates)
+            .extracting(EbmsMessageEntity::getMessageId)
+            .doesNotContain("msg-role-mismatch-001");
+    }
+
+    @Test
     void existsByMessageId_afterSave_returnsTrue() {
         EbmsMessageEntity entity = buildMessage("msg-exist-001");
         messageRepository.save(entity);
