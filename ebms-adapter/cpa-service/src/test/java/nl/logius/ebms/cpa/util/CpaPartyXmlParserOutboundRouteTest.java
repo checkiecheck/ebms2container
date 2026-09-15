@@ -17,6 +17,7 @@ class CpaPartyXmlParserOutboundRouteTest {
             <tp:CollaborationProtocolAgreement xmlns:tp="urn:oasis:names:tc:ebxml-cppa:schema:xsd:2.0">
               <tp:PartyInfo>
                 <tp:PartyId>sender</tp:PartyId>
+                <tp:DeliveryChannel tp:channelId="sender-channel"/>
                 <tp:CollaborationRole>
                   <tp:Role tp:name="InitiatorRole"/>
                   <tp:ServiceBinding>
@@ -24,7 +25,7 @@ class CpaPartyXmlParserOutboundRouteTest {
                     <tp:CanSend>
                       <tp:ThisPartyActionBinding tp:id="send-submit" tp:action="Submit" tp:packageId="pkg">
                         <tp:BusinessTransactionCharacteristics/>
-                        <tp:ChannelId>receiver-channel</tp:ChannelId>
+                        <tp:ChannelId>sender-channel</tp:ChannelId>
                       </tp:ThisPartyActionBinding>
                       <tp:OtherPartyActionBinding>receive-submit</tp:OtherPartyActionBinding>
                     </tp:CanSend>
@@ -41,6 +42,7 @@ class CpaPartyXmlParserOutboundRouteTest {
                     <tp:CanReceive>
                       <tp:ThisPartyActionBinding tp:id="receive-submit" tp:action="Submit" tp:packageId="pkg">
                         <tp:BusinessTransactionCharacteristics/>
+                        <tp:ChannelId>receiver-channel</tp:ChannelId>
                       </tp:ThisPartyActionBinding>
                     </tp:CanReceive>
                   </tp:ServiceBinding>

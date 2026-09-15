@@ -268,7 +268,7 @@ private static String getLenientAttribute(Element element, String attributeName)
                         cpaId, sender.id(), receiver.id());
                     continue;
                 }
-                for (String channelId : sender.channelIds()) {
+                for (String channelId : receiver.channelIds()) {
                     String channelPartyId = channelOwners.get(channelId);
                     if (channelPartyId == null) {
                         log.warn("Onopgeloste ChannelId in outbound route van CPA {}: binding={} channel={}",
@@ -370,7 +370,7 @@ private static String getLenientAttribute(Element element, String attributeName)
 
         private boolean completeReceiver() {
             return id != null && partyId != null && role != null && service != null
-                && action != null;
+                && action != null && !channelIds.isEmpty();
         }
     }
 
