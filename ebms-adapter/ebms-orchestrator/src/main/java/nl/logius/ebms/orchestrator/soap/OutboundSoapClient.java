@@ -152,9 +152,11 @@ public class OutboundSoapClient {
         } catch (EbmsException e) {
             throw e;
         } catch (Exception e) {
-            log.error("[OUTBOUND] Verzending mislukt naar endpoint={}: {}", endpointUrl, e.getMessage());
+            Throwable rootCause = rootCause(e);
+            log.error("[OUTBOUND] Verzending mislukt naar endpoint={} oorzaak={} bericht={}",
+                endpointUrl, rootCause.getClass().getSimpleName(), rootCause.getMessage(), e);
             throw new EbmsException("CONNECTION_ERROR",
-                "SOAP-verzending mislukt naar " + endpointUrl + ": " + e.getMessage());
+                "SOAP-verzending mislukt naar " + endpointUrl + ": " + describeFailure(e));
         }
     }
 
@@ -162,6 +164,21 @@ public class OutboundSoapClient {
 
     private boolean isHttps(String endpointUrl) {
         return endpointUrl != null && endpointUrl.toLowerCase().startsWith("https");
+    }
+
+    private Throwable rootCause(Throwable failure) {
+        Throwable cause = failure;
+        while (cause.getCause() != null && cause.getCause() != cause) {
+            cause = cause.getCause();
+        }
+        return cause;
+    }
+
+    private String describeFailure(Throwable failure) {
+        Throwable rootCause = rootCause(failure);
+        String message = rootCause.getMessage();
+        return rootCause.getClass().getSimpleName()
+            + (message == null || message.isBlank() ? "" : ": " + message);
     }
 
     /** Configureert de vaste ebMS2 SOAP 1.1 HTTP-action. */
@@ -219,6 +236,9 @@ public class OutboundSoapClient {
                     && keystorePassword != null && !keystorePassword.isBlank()) {
                 char[] keyPass = keystorePassword.toCharArray();
                 sslContextBuilder.loadKeyMaterial(new File(keystorePath), keyPass, keyPass);
+                log.debug("[OUTBOUND] Client-keystore geladen voor mTLS: path={}", keystorePath);
+            } else {
+                log.warn("[OUTBOUND] Geen client-keystore geconfigureerd; server mTLS-authenticatie kan mislukken");
             }
 
             SSLContext sslContext = sslContextBuilder.build();
