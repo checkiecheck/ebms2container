@@ -184,12 +184,13 @@ public class SoapHelper {
             addChild(mh, "Action", EBXML_MSG_NS, header.getAction());
 
             // MessageData (ebMS2 spec §3.1.6: <eb:MessageData>)
+            // Sequence is XSD-conform: MessageId, Timestamp.
             SOAPElement mi = mh.addChildElement("MessageData", "eb", EBXML_MSG_NS);
-            addChild(mi, "Timestamp", EBXML_MSG_NS, Instant.now().toString());
             addChild(mi, "MessageId", EBXML_MSG_NS,
                 header.getMessageInfo() != null && header.getMessageInfo().getMessageId() != null
                     ? header.getMessageInfo().getMessageId()
                     : UUID.randomUUID() + "@ebms-orchestrator");
+            addChild(mi, "Timestamp", EBXML_MSG_NS, Instant.now().toString());
 
             // AckRequested (optioneel, rm-profielen)
             if (requireAck) {
@@ -235,10 +236,11 @@ public class SoapHelper {
             addChild(msgHeader, "Action",  EBXML_MSG_NS, "Acknowledgment");
 
             // MessageData (ebMS2 spec §3.1.6: <eb:MessageData>)
+            // XSD-order: MessageId, Timestamp, RefToMessageId
             SOAPElement msgInfo = msgHeader.addChildElement("MessageData", "eb", EBXML_MSG_NS);
-            addChild(msgInfo, "Timestamp",      EBXML_MSG_NS, Instant.now().toString());
             addChild(msgInfo, "MessageId",      EBXML_MSG_NS,
                 UUID.randomUUID() + "@ebms-orchestrator");
+            addChild(msgInfo, "Timestamp",      EBXML_MSG_NS, Instant.now().toString());
             addChild(msgInfo, "RefToMessageId", EBXML_MSG_NS,
                 originalHeader.getMessageInfo().getMessageId());
 

@@ -40,6 +40,23 @@ class SoapHelperMessageHeaderOrderTest {
             .item(0).getTextContent()).contains("receiver");
         assertThat(messageHeader.getElementsByTagNameNS(SoapHelper.EBXML_MSG_NS, "To")
             .item(0).getTextContent()).contains("sender");
+
+        SOAPElement messageData = (SOAPElement) messageHeader
+            .getElementsByTagNameNS(SoapHelper.EBXML_MSG_NS, "MessageData").item(0);
+        assertThat(childNames(messageData))
+            .containsExactly("MessageId", "Timestamp", "RefToMessageId");
+    }
+
+    @Test
+    void outboundMessageDataUsesMessageIdBeforeTimestamp() throws Exception {
+        SOAPMessage message = soapHelper.buildOutboundSoap(header(), false);
+        SOAPElement messageHeader = (SOAPElement) message.getSOAPHeader()
+            .getElementsByTagNameNS(SoapHelper.EBXML_MSG_NS, "MessageHeader").item(0);
+        SOAPElement messageData = (SOAPElement) messageHeader
+            .getElementsByTagNameNS(SoapHelper.EBXML_MSG_NS, "MessageData").item(0);
+
+        assertThat(childNames(messageData))
+            .containsExactly("MessageId", "Timestamp");
     }
 
     @Test
