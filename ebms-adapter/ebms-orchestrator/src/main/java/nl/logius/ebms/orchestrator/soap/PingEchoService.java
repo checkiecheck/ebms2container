@@ -70,10 +70,11 @@ public class PingEchoService {
             addText(msgHeader, "Action",         "Pong");
 
             // MessageData (ebMS2 spec section 3.1.6)
+            // XSD order: MessageId, Timestamp, RefToMessageId
             SOAPElement msgInfo = msgHeader.addChildElement("MessageData", "eb",
                 SoapHelper.EBXML_MSG_NS);
-            addText(msgInfo, "Timestamp",      Instant.now().toString());
             addText(msgInfo, "MessageId",      UUID.randomUUID() + "@ebms-orchestrator");
+            addText(msgInfo, "Timestamp",      Instant.now().toString());
             addText(msgInfo, "RefToMessageId", refToMsgId);
 
             pong.saveChanges();
