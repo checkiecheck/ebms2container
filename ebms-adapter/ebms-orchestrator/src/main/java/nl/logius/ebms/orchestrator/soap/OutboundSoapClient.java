@@ -6,6 +6,7 @@ import jakarta.xml.soap.SOAPMessage;
 import jakarta.xml.ws.Dispatch;
 import jakarta.xml.ws.BindingProvider;
 import jakarta.xml.ws.Service;
+import jakarta.xml.ws.soap.SOAPFaultException;
 import lombok.extern.slf4j.Slf4j;
 import nl.logius.ebms.common.exception.EbmsException;
 import nl.logius.ebms.common.model.cpa.PartnerCertificateDto;
@@ -151,6 +152,12 @@ public class OutboundSoapClient {
 
         } catch (EbmsException e) {
             throw e;
+        } catch (SOAPFaultException e) {
+            String fault = describeSoapFault(e);
+            log.error("[OUTBOUND] SOAP Fault ontvangen van endpoint={} details={}",
+                endpointUrl, fault, e);
+            throw new EbmsException("SOAP_FAULT",
+                "SOAP Fault van partner endpoint (" + endpointUrl + "): " + fault);
         } catch (Exception e) {
             Throwable rootCause = rootCause(e);
             log.error("[OUTBOUND] Verzending mislukt naar endpoint={} oorzaak={} bericht={}",
@@ -179,6 +186,33 @@ public class OutboundSoapClient {
         String message = rootCause.getMessage();
         return rootCause.getClass().getSimpleName()
             + (message == null || message.isBlank() ? "" : ": " + message);
+    }
+
+    private String describeSoapFault(SOAPFaultException failure) {
+        var soapFault = failure.getFault();
+        if (soapFault == null) {
+            return describeFailure(failure);
+        }
+
+        String faultCode = soapFault.getFaultCode();
+        String faultString = soapFault.getFaultString();
+        String detail = soapFault.getDetail() == null
+            ? null
+            : soapFault.getDetail().getTextContent();
+        StringBuilder description = new StringBuilder();
+        appendFaultPart(description, "code", faultCode);
+        appendFaultPart(description, "message", faultString);
+        appendFaultPart(description, "detail", detail);
+        return description.length() == 0 ? describeFailure(failure) : description.toString();
+    }
+
+    private void appendFaultPart(StringBuilder description, String name, String value) {
+        if (value != null && !value.isBlank()) {
+            if (description.length() > 0) {
+                description.append(", ");
+            }
+            description.append(name).append('=').append(value.trim());
+        }
     }
 
     /** Configureert de vaste ebMS2 SOAP 1.1 HTTP-action. */
