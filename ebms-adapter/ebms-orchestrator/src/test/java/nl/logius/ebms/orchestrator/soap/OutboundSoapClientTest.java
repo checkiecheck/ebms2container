@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 
 class OutboundSoapClientTest {
@@ -70,5 +71,41 @@ class OutboundSoapClientTest {
             "to");
 
         assertThat(soapAction.get()).isEqualTo("\"ebXML\"");
+    }
+
+    @Test
+    void send_emptyResponseBody_isTreatedAsConnectionError() throws Exception {
+        server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        server.createContext("/ebms", exchange -> {
+            exchange.sendResponseHeaders(200, 0);
+        });
+        server.start();
+
+        SoapHelper soapHelper = new SoapHelper();
+        EbxmlMessageHeader header = EbxmlMessageHeader.builder()
+            .cpaId("cpa-1")
+            .conversationId("conversation-1")
+            .from(List.of(PartyId.builder().value("from").build()))
+            .to(List.of(PartyId.builder().value("to").build()))
+            .service(ServiceType.builder().value("urn:test:service").build())
+            .action("TestAction")
+            .messageInfo(MessageInfo.builder()
+                .messageId("message-2")
+                .timestamp(Instant.now())
+                .build())
+            .build();
+        SOAPMessage message = soapHelper.buildOutboundSoap(header, false);
+
+        OutboundSoapClient client = new OutboundSoapClient(
+            new EbmsOutboundSSLProperties(), mock(CpaValidationService.class), soapHelper);
+
+        assertThatThrownBy(() -> client.send(
+                "http://localhost:" + server.getAddress().getPort() + "/ebms",
+                soapHelper.soapToString(message),
+                "cpa-1",
+                "to"))
+            .isInstanceOf(nl.logius.ebms.common.exception.EbmsException.class)
+            .satisfies(ex -> assertThat(((nl.logius.ebms.common.exception.EbmsException) ex).getErrorCode())
+                .isEqualTo("CONNECTION_ERROR"));
     }
 }

@@ -29,6 +29,7 @@ import java.security.KeyStore;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.util.List;
+import javax.xml.stream.XMLStreamException;
 import org.w3c.dom.NodeList;
 
 /**
@@ -153,6 +154,14 @@ public class OutboundSoapClient {
         } catch (EbmsException e) {
             throw e;
         } catch (SOAPFaultException e) {
+            if (isResponseParsingFailure(e)) {
+                Throwable rootCause = rootCause(e);
+                log.error("[OUTBOUND] Ongeldige SOAP-response ontvangen van endpoint={} oorzaak={} bericht={}",
+                    endpointUrl, rootCause.getClass().getSimpleName(), rootCause.getMessage(), e);
+                throw new EbmsException("CONNECTION_ERROR",
+                    "SOAP-response van " + endpointUrl + " kon niet worden gelezen: "
+                        + describeFailure(e));
+            }
             String fault = describeSoapFault(e);
             log.error("[OUTBOUND] SOAP Fault ontvangen van endpoint={} details={}",
                 endpointUrl, fault, e);
@@ -179,6 +188,10 @@ public class OutboundSoapClient {
             cause = cause.getCause();
         }
         return cause;
+    }
+
+    private boolean isResponseParsingFailure(Throwable failure) {
+        return rootCause(failure) instanceof XMLStreamException;
     }
 
     private String describeFailure(Throwable failure) {
