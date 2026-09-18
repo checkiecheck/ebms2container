@@ -111,10 +111,12 @@ public class XmlSigningService {
             X509Certificate cert      = keyStoreService.getCertificate(keyAlias);
 
             // Bepaal algoritme op basis van sleuteltype
-            String sigAlgo = requestedSignatureAlgorithm != null && !requestedSignatureAlgorithm.isBlank()
-                ? requestedSignatureAlgorithm : determineSignatureAlgorithm(cert);
-            String digestAlgo = requestedHashFunction != null && !requestedHashFunction.isBlank()
-                ? requestedHashFunction : "http://www.w3.org/2001/04/xmlenc#sha256";
+            String sigAlgo = normalizeSignatureAlgorithm(
+                requestedSignatureAlgorithm != null && !requestedSignatureAlgorithm.isBlank()
+                    ? requestedSignatureAlgorithm : determineSignatureAlgorithm(cert));
+            String digestAlgo = normalizeDigestAlgorithm(
+                requestedHashFunction != null && !requestedHashFunction.isBlank()
+                    ? requestedHashFunction : "http://www.w3.org/2001/04/xmlenc#sha256");
             validateAlgorithms(cert, sigAlgo, digestAlgo);
             warnLegacyAlgorithm(messageId, sigAlgo, digestAlgo);
 
@@ -275,6 +277,37 @@ public class XmlSigningService {
         return switch (algorithm) {
             case "EC"  -> XMLSignature.ALGO_ID_SIGNATURE_ECDSA_SHA256;
             default    -> XMLSignature.ALGO_ID_SIGNATURE_RSA_SHA256;
+        };
+    }
+
+    private String normalizeDigestAlgorithm(String hashFunction) {
+        if (hashFunction == null || hashFunction.isBlank()) {
+            return "http://www.w3.org/2001/04/xmlenc#sha256";
+        }
+        String normalized = hashFunction.trim().toLowerCase(java.util.Locale.ROOT);
+        return switch (normalized) {
+            case "sha1", "sha-1", "http://www.w3.org/2000/09/xmldsig#sha1" ->
+                "http://www.w3.org/2000/09/xmldsig#sha1";
+            case "sha256", "sha-256", "http://www.w3.org/2001/04/xmlenc#sha256",
+                 "http://www.w3.org/2001/04/xmldsig-more#sha256" ->
+                "http://www.w3.org/2001/04/xmlenc#sha256";
+            default -> hashFunction.trim();
+        };
+    }
+
+    private String normalizeSignatureAlgorithm(String signatureAlgorithm) {
+        if (signatureAlgorithm == null || signatureAlgorithm.isBlank()) {
+            return signatureAlgorithm;
+        }
+        String normalized = signatureAlgorithm.trim().toLowerCase(java.util.Locale.ROOT);
+        return switch (normalized) {
+            case "rsa-sha1", "rsa_sha1", "http://www.w3.org/2000/09/xmldsig#rsa-sha1" ->
+                "http://www.w3.org/2000/09/xmldsig#rsa-sha1";
+            case "rsa-sha256", "rsa_sha256", "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256" ->
+                "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256";
+            case "ecdsa-sha256", "ecdsa_sha256", "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256" ->
+                "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256";
+            default -> signatureAlgorithm.trim();
         };
     }
 

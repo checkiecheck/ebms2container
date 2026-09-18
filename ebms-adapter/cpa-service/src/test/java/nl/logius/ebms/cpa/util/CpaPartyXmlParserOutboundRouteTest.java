@@ -78,4 +78,58 @@ class CpaPartyXmlParserOutboundRouteTest {
             assertThat(route.getChannelId()).isEqualTo("receiver-channel");
         });
     }
+
+    @Test
+    void parseOutboundRoutes_normalizesXmldsigMoreSha256DigestToXmlencSha256() {
+        String xml = """
+            <tp:CollaborationProtocolAgreement xmlns:tp="urn:oasis:names:tc:ebxml-cppa:schema:xsd:2.0">
+              <tp:PartyInfo>
+                <tp:PartyId>sender</tp:PartyId>
+                <tp:DeliveryChannel tp:channelId="sender-channel"/>
+                <tp:CollaborationRole>
+                  <tp:Role tp:name="InitiatorRole"/>
+                  <tp:ServiceBinding>
+                    <tp:Service>urn:test:service</tp:Service>
+                    <tp:CanSend>
+                      <tp:ThisPartyActionBinding tp:id="send-submit" tp:action="Submit">
+                        <tp:ChannelId>sender-channel</tp:ChannelId>
+                      </tp:ThisPartyActionBinding>
+                      <tp:OtherPartyActionBinding>receive-submit</tp:OtherPartyActionBinding>
+                    </tp:CanSend>
+                  </tp:ServiceBinding>
+                </tp:CollaborationRole>
+              </tp:PartyInfo>
+              <tp:PartyInfo>
+                <tp:PartyId>receiver</tp:PartyId>
+                <tp:DeliveryChannel tp:channelId="receiver-channel" tp:docExchangeId="receiver-dx"/>
+                <tp:DocExchange tp:docExchangeId="receiver-dx">
+                  <tp:SenderNonRepudiation>
+                    <tp:HashFunction>http://www.w3.org/2001/04/xmldsig-more#sha256</tp:HashFunction>
+                    <tp:SignatureAlgorithm>RSA-SHA256</tp:SignatureAlgorithm>
+                  </tp:SenderNonRepudiation>
+                </tp:DocExchange>
+                <tp:CollaborationRole>
+                  <tp:Role tp:name="ResponderROLE"/>
+                  <tp:ServiceBinding>
+                    <tp:Service>urn:test:service</tp:Service>
+                    <tp:CanReceive>
+                      <tp:ThisPartyActionBinding tp:id="receive-submit" tp:action="Submit">
+                        <tp:ChannelId>receiver-channel</tp:ChannelId>
+                      </tp:ThisPartyActionBinding>
+                    </tp:CanReceive>
+                  </tp:ServiceBinding>
+                </tp:CollaborationRole>
+              </tp:PartyInfo>
+            </tp:CollaborationProtocolAgreement>
+            """;
+
+        List<CpaOutboundRouteEntity> routes = parser.parseOutboundRoutes(xml, "cpa-1");
+
+        assertThat(routes).singleElement().satisfies(route -> {
+            assertThat(route.getHashFunction())
+                .isEqualTo("http://www.w3.org/2001/04/xmlenc#sha256");
+            assertThat(route.getSignatureAlgorithm())
+                .isEqualTo("http://www.w3.org/2001/04/xmldsig-more#rsa-sha256");
+        });
+    }
 }
