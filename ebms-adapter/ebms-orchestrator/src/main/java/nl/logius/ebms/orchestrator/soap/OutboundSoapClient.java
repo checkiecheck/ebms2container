@@ -6,6 +6,7 @@ import jakarta.xml.soap.SOAPMessage;
 import jakarta.xml.ws.Dispatch;
 import jakarta.xml.ws.BindingProvider;
 import jakarta.xml.ws.Service;
+import jakarta.xml.ws.handler.MessageContext;
 import jakarta.xml.ws.soap.SOAPFaultException;
 import lombok.extern.slf4j.Slf4j;
 import nl.logius.ebms.common.exception.EbmsException;
@@ -124,7 +125,7 @@ public class OutboundSoapClient {
             }
 
             // ── 5. Bericht verzenden ──────────────────────────────────────
-            SOAPMessage response = dispatch.invoke(soapMessage);
+            SOAPMessage response = invoke(dispatch, soapMessage, endpointUrl);
 
             // ── 6. SOAP Fault check ───────────────────────────────────────
             if (response != null && response.getSOAPBody() != null
@@ -180,6 +181,23 @@ public class OutboundSoapClient {
 
     private boolean isHttps(String endpointUrl) {
         return endpointUrl != null && endpointUrl.toLowerCase().startsWith("https");
+    }
+
+    private SOAPMessage invoke(Dispatch<SOAPMessage> dispatch, SOAPMessage soapMessage, String endpointUrl) {
+        try {
+            return dispatch.invoke(soapMessage);
+        } catch (SOAPFaultException e) {
+            if (isResponseParsingFailure(e) && isNoContentResponse(dispatch)) {
+                log.info("[OUTBOUND] HTTP 204 No Content ontvangen van endpoint={}; geen SOAP-response te parsen", endpointUrl);
+                return null;
+            }
+            throw e;
+        }
+    }
+
+    private boolean isNoContentResponse(Dispatch<SOAPMessage> dispatch) {
+        Object statusCode = ((BindingProvider) dispatch).getResponseContext().get(MessageContext.HTTP_RESPONSE_CODE);
+        return statusCode instanceof Number number && number.intValue() == 204;
     }
 
     private Throwable rootCause(Throwable failure) {

@@ -74,7 +74,42 @@ class OutboundSoapClientTest {
     }
 
     @Test
-    void send_emptyResponseBody_isTreatedAsConnectionError() throws Exception {
+    void send_noContentResponse_isTreatedAsSuccessfulDelivery() throws Exception {
+        server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        server.createContext("/ebms", exchange -> {
+            exchange.sendResponseHeaders(204, -1);
+        });
+        server.start();
+
+        SoapHelper soapHelper = new SoapHelper();
+        EbxmlMessageHeader header = EbxmlMessageHeader.builder()
+            .cpaId("cpa-1")
+            .conversationId("conversation-1")
+            .from(List.of(PartyId.builder().value("from").build()))
+            .to(List.of(PartyId.builder().value("to").build()))
+            .service(ServiceType.builder().value("urn:test:service").build())
+            .action("TestAction")
+            .messageInfo(MessageInfo.builder()
+                .messageId("message-2")
+                .timestamp(Instant.now())
+                .build())
+            .build();
+        SOAPMessage message = soapHelper.buildOutboundSoap(header, false);
+
+        OutboundSoapClient client = new OutboundSoapClient(
+            new EbmsOutboundSSLProperties(), mock(CpaValidationService.class), soapHelper);
+
+        SOAPMessage response = client.send(
+            "http://localhost:" + server.getAddress().getPort() + "/ebms",
+            soapHelper.soapToString(message),
+            "cpa-1",
+            "to");
+
+        assertThat(response).isNull();
+    }
+
+    @Test
+    void send_emptyOkResponseBody_isTreatedAsConnectionError() throws Exception {
         server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
         server.createContext("/ebms", exchange -> {
             exchange.sendResponseHeaders(200, 0);
@@ -90,7 +125,7 @@ class OutboundSoapClientTest {
             .service(ServiceType.builder().value("urn:test:service").build())
             .action("TestAction")
             .messageInfo(MessageInfo.builder()
-                .messageId("message-2")
+                .messageId("message-3")
                 .timestamp(Instant.now())
                 .build())
             .build();
