@@ -1,5 +1,5 @@
 # Integraal Deployment & Integratie Handboek: ebms2container Adapter
-**Versie:** 3.0 (Productie, OpenShift Routes & Logius Compliance Dual-Setup)
+**Versie:** 4.0 (Productie, OpenShift Routes, Parametriseerbare CI/CD & Logius Compliance Dual-Setup)
 
 Dit handboek beschrijft de volledige deployment en configuratie van de container-native ebMS2 Digikoppeling adapter. Er wordt een strikt en expliciet onderscheid gemaakt tussen:
 1. **Generieke / Productie-omgeving:** De universele uitrolregels voor productie/OTAP (met PKIoverheid certificaten, echte Digipoort/Logius endpoints en e-Herkenning/OIN's).
@@ -36,9 +36,10 @@ Dit handboek beschrijft de volledige deployment en configuratie van de container
 - **mTLS:** Passthrough of Gateway SSL-termination met validatie tegen de PKIoverheid Staat der Nederlanden CA-keten.
 - **Inbound Paden:** Routering van inkomende ebMS SOAP-berichten direct naar `ebms-ebms-orchestrator:8080/services/ebms`.
 - **OIN Validatie:** De Ingress/API Gateway valideert de client-certificaat OIN uit de mTLS-handshake en geeft deze via de HTTP-header `X-Forwarded-Client-OIN` door aan de Orchestrator.
+- **Productie Poort-Exposition:** Op productie wordt géén `kubectl port-forward` gebruikt. Ingress Controllers (zoals Kong, NGINX of HAProxy) of OpenShift Routers worden direct op cluster- / infrastructureel niveau blootgesteld via een `LoadBalancer` of `NodePort` Service op de standaard TLS-poorten (8443/443/8843).
 
 #### B. Logius Compliance / Testsuite-omgeving [Specifiek voor Testsuite / Simulatie]
-- **Host Aliases:** Interne DNS/HostAliases in de K8s Pod spec voor `proxy-dart` en `proxy-cvwus` (koppelend aan de VM IP `192.168.56.10`).
+- **Host Aliases:** Interne DNS/HostAliases in de K8s Pod spec voor `proxy-dart` en `proxy-cvwus` (koppelend aan het netwerk-IP van de testomgeving).
 - **Testcertificaten:** Geautomatiseerde inleesstap vanuit de Logius testgenerator (`$COMPLIANCE_GEN_DIR/client-certs/dart.pem` + `ca-chain.pem`).
 - **Non-SNI SSL Fallback (Kong Gateway):** De Ingress Controller luistert op poort `8843` (SSL 8443) met `KONG_SSL_CERT` vastgezet op `ebms-tls-secret` om legacy test-clients te ondersteunen die geen Server Name Indication (SNI) meesturen.
 - **DigipoortStub Rewrite:** Ingress pad `/digipoortStub` wordt via een `KongPlugin` (request-transformer) herschreven naar `/services/ebms` en verrijkt met de test-OIN header (`X-Forwarded-Client-OIN: 00000004003214345001`).
@@ -171,15 +172,29 @@ containers:
 
 ---
 
-### 3.2 Het Geautomatiseerde Deployment Script (`deploy.sh`)
-Onderstaand script voert de gehele K8s/k3s uitrol uit:
+### 3.2 Het Geautomatisede Deployment Script (`deploy.sh`)
+
+> 💡 **Opmerkingen over parametrisering & productie-instellingen:**
+> 1. **Parametrisering:** Alle paden, container registries en database-hosts worden aangestuurd via omgevingsvariabelen met veilige defaults. Zowel in lokale Vagrant-omgevingen als in CI/CD pipelines (GitLab/GitHub Actions) kunnen deze eenvoudig worden overschreven.
+> 2. **Probes & Initial Delay (`initialDelaySeconds=600`):** De geselecteerde `initialDelaySeconds=600` in de helm template aanroep dient als ruime **bouwstraat/ontwikkel-marge**. Dit voorkomt dat Kubernetes de pods voortijdig herstart tijdens het uitvoeren van zware Flyway-databasemigraties in bron-gebeperkte test-VM's. Voor **productie** wordt geadviseerd om een K8s `startupProbe` in te zetten, gecombineerd met een kortere `livenessProbe` delay van 30–60 seconden.
+> 3. **Kong Port-Forwarding (Stap 8):** Het commando `kubectl port-forward` in stap 8 is uitsluitend bedoeld voor **lokale ontwikkelaarsomgevingen / Vagrant test-VM's**. Op **productie** dient de Ingress Gateway rechtstreeks via een Kubernetes `LoadBalancer` of `NodePort` Service (of OpenShift Route) te worden ontsloten op poort 8443/8843.
 
 ```bash
 #!/usr/bin/env bash
 set -e
 
-REGISTRY="192.168.56.10:5555/municipal"
-WORKDIR="/home/vagrant/demo/workspace/ebms2container"
+# ====================================================================
+# Parametriseerbare Omgevingsvariabelen (met defaults)
+# ====================================================================
+REGISTRY="${REGISTRY:-192.168.56.10:5555/municipal}"
+WORKDIR="${WORKDIR:-$(pwd)}"
+DB_HOST="${DB_HOST:-192.168.56.10}"
+DB_PORT="${DB_PORT:-5432}"
+DB_USER="${DB_USER:-karavan}"
+DB_PASSWORD="${DB_PASSWORD:-karavan}"
+DB_NAME="${DB_NAME:-karavan}"
+COMPLIANCE_GEN_DIR="${COMPLIANCE_GEN_DIR:-/home/vagrant/compliance/generate-certs/generated}"
+INITIAL_DELAY_DEV="${INITIAL_DELAY_DEV:-600}"
 
 cd "$WORKDIR"
 
@@ -204,13 +219,12 @@ kubectl delete hpa --all 2>/dev/null || true
 kubectl delete deployment,svc,pod -l app.kubernetes.io/instance=ebms --force --grace-period=0 2>/dev/null || true
 
 echo "==> 4. PostgreSQL Schemas aanmaken..."
-export PGPASSWORD=karavan
-psql -h 192.168.56.10 -U karavan -d karavan -c "CREATE SCHEMA IF NOT EXISTS cpa;" || true
-psql -h 192.168.56.10 -U karavan -d karavan -c "CREATE SCHEMA IF NOT EXISTS crypto;" || true
-psql -h 192.168.56.10 -U karavan -d karavan -c "CREATE SCHEMA IF NOT EXISTS orchestrator;" || true
+export PGPASSWORD="$DB_PASSWORD"
+psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -c "CREATE SCHEMA IF NOT EXISTS cpa;" || true
+psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -c "CREATE SCHEMA IF NOT EXISTS crypto;" || true
+psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -c "CREATE SCHEMA IF NOT EXISTS orchestrator;" || true
 
 mkdir -p ./keystores
-COMPLIANCE_GEN_DIR="/home/vagrant/compliance/generate-certs/generated"
 
 # --- [COMPLIANCE TESTSUITE SPECIFIEK] Certificaat & Keystore Preparatie ---
 if [ -f "$COMPLIANCE_GEN_DIR/client-certs/dart.pem" ] && [ -f "$COMPLIANCE_GEN_DIR/client-ca/ca-chain.pem" ]; then
@@ -272,6 +286,7 @@ fi
 rm -rf ./keystores
 
 echo "==> 5. Helm Template genereren..."
+# N.B. initialDelaySeconds=$INITIAL_DELAY_DEV is ingesteld voor de bouwstraat/lokale VM.
 helm template ebms ./ebms-adapter/helm \
   --set postgresql.enabled=false \
   --set rabbitmq.enabled=false \
@@ -281,12 +296,12 @@ helm template ebms ./ebms-adapter/helm \
   --set crypto-service.image.pullPolicy=Always \
   --set cpa-service.image.pullPolicy=Always \
   --set ebms-orchestrator.image.pullPolicy=Always \
-  --set ebms-orchestrator.livenessProbe.initialDelaySeconds=600 \
-  --set ebms-orchestrator.readinessProbe.initialDelaySeconds=600 \
-  --set cpa-service.livenessProbe.initialDelaySeconds=600 \
-  --set cpa-service.readinessProbe.initialDelaySeconds=600 \
-  --set crypto-service.livenessProbe.initialDelaySeconds=600 \
-  --set crypto-service.readinessProbe.initialDelaySeconds=600 > manifest_raw.yaml
+  --set ebms-orchestrator.livenessProbe.initialDelaySeconds="${INITIAL_DELAY_DEV}" \
+  --set ebms-orchestrator.readinessProbe.initialDelaySeconds="${INITIAL_DELAY_DEV}" \
+  --set cpa-service.livenessProbe.initialDelaySeconds="${INITIAL_DELAY_DEV}" \
+  --set cpa-service.readinessProbe.initialDelaySeconds="${INITIAL_DELAY_DEV}" \
+  --set crypto-service.livenessProbe.initialDelaySeconds="${INITIAL_DELAY_DEV}" \
+  --set crypto-service.readinessProbe.initialDelaySeconds="${INITIAL_DELAY_DEV}" > manifest_raw.yaml
 
 echo "==> 6. Manifest patchen & Ingressen toepassen..."
 # (DB environment variabelen & Secret mounts worden geënt in manifest.yaml)
@@ -299,12 +314,16 @@ kubectl patch deployment kong-kong -n kong --type='json' -p='[
   {"op": "add", "path": "/spec/template/spec/containers/0/env/-", "value": {"name": "KONG_SSL_CERT_KEY", "value": "/etc/secrets/ebms-tls-secret/tls.key"}}
 ]' 2>/dev/null || true
 
-echo "==> 8. Kong herstarten & Port-Forward op poort 8843 instellen..."
+echo "==> 8. Kong herstarten (Lokale Port-Forward uitsluitend voor Dev/Vagrant)..."
 kubectl rollout restart deployment/kong-kong -n kong
 kubectl rollout status deployment/kong-kong -n kong --timeout=300s || true
 
-pkill -f "port-forward.*8843" 2>/dev/null || true
-nohup kubectl port-forward -n kong service/kong-kong-proxy 8843:8443 --address 0.0.0.0 > /dev/null 2>&1 &
+# N.B. Port-forward is uitsluitend voor de lokale Vagrant/k3s ontwikkelomgeving.
+# Op Productie vervalt deze stap (zie Sectie 1.3A voor LoadBalancer/NodePort/Route exposition).
+if [ "${ENV_TYPE:-dev}" = "dev" ]; then
+  pkill -f "port-forward.*8843" 2>/dev/null || true
+  nohup kubectl port-forward -n kong service/kong-kong-proxy 8843:8443 --address 0.0.0.0 > /dev/null 2>&1 &
+fi
 
 echo "==> 9. Wachten op Spring Boot startup van de Orchestrator..."
 until kubectl logs deployment/ebms-ebms-orchestrator 2>&1 | grep -q "Started EbmsOrchestratorApplication"; do
