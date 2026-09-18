@@ -113,6 +113,7 @@ class OutboundSoapClientTest {
         server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
         server.createContext("/ebms", exchange -> {
             exchange.sendResponseHeaders(200, 0);
+            exchange.getResponseBody().close();
         });
         server.start();
 

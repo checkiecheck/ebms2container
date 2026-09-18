@@ -3,44 +3,37 @@ package nl.logius.ebms.orchestrator.soap;
 import jakarta.xml.soap.MessageFactory;
 import jakarta.xml.soap.MimeHeaders;
 import jakarta.xml.soap.SOAPMessage;
-import jakarta.xml.ws.Dispatch;
-import jakarta.xml.ws.BindingProvider;
-import jakarta.xml.ws.Service;
-import jakarta.xml.ws.handler.MessageContext;
-import jakarta.xml.ws.soap.SOAPFaultException;
 import lombok.extern.slf4j.Slf4j;
 import nl.logius.ebms.common.exception.EbmsException;
 import nl.logius.ebms.common.model.cpa.PartnerCertificateDto;
 import nl.logius.ebms.orchestrator.service.CpaValidationService;
-import org.apache.cxf.endpoint.Client;
-import org.apache.cxf.jaxws.DispatchImpl;
-import org.apache.cxf.transport.http.HTTPConduit;
-import org.apache.cxf.transports.http.configuration.HTTPClientPolicy;
 import org.apache.hc.core5.ssl.SSLContextBuilder;
 import org.apache.hc.core5.ssl.SSLContexts;
 import org.springframework.stereotype.Component;
 import org.springframework.beans.factory.annotation.Value;
 
 import javax.net.ssl.SSLContext;
-import javax.xml.namespace.QName;
 import java.io.ByteArrayInputStream;
 import java.io.File;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.util.List;
-import javax.xml.stream.XMLStreamException;
-import org.w3c.dom.NodeList;
 
 /**
- * Apache CXF {@link Dispatch}&lt;{@link SOAPMessage}&gt; client voor het versturen van
- * ondertekende en/of versleutelde ebMS2-enveloppen (SOAP 1.1, Message mode).
+ * HTTP-client voor het versturen van ondertekende en/of versleutelde ebMS2-enveloppen
+ * (SOAP 1.1, Message mode).
  *
  * <p>Design-keuzes:
  * <ul>
- *   <li>Geen WSDL vereist: dynamische poort-binding via {@link Service#addPort} (flexibel
- *       voor de 29 gemeentelijke koppelingen zonder vooraf-compileren).</li>
+    *   <li>Geen WSDL vereist: raw SOAP over HTTP, zodat HTTP 204 No Content kan worden
+    *       afgehandeld voordat een SOAP-parser de lege body probeert te lezen.</li>
  *   <li>Timeouts configureerbaar via {@code application.yml} (BIO-vereiste: voorkomen van
  *       thread-exhaustion bij trage overheidsvoorzieningen).</li>
  *   <li>mTLS: bij HTTPS-endpoints wordt de trust dynamisch opgebouwd op basis van het
@@ -55,11 +48,6 @@ public class OutboundSoapClient {
 
     private static final String EBMS_SOAP_ACTION = "ebXML";
 
-    private static final QName SERVICE_NAME =
-        new QName(SoapHelper.EBXML_MSG_NS, "MSHService");
-    private static final QName PORT_NAME =
-        new QName(SoapHelper.EBXML_MSG_NS, "MSHPort");
-
     @Value("${ebms.outbound.connect-timeout-ms:10000}")
     private long connectTimeoutMs;
 
@@ -69,6 +57,8 @@ public class OutboundSoapClient {
     private final EbmsOutboundSSLProperties sslProperties;
     private final CpaValidationService cpaValidationService;
     private final SoapHelper soapHelper;
+    private static final long DEFAULT_CONNECT_TIMEOUT_MS = 10_000L;
+    private static final long DEFAULT_READ_TIMEOUT_MS = 30_000L;
 
     public OutboundSoapClient(EbmsOutboundSSLProperties sslProperties,
                                CpaValidationService cpaValidationService,
@@ -81,7 +71,7 @@ public class OutboundSoapClient {
     /**
      * Verstuurt een (gesigneerd en/of versleuteld) SOAP-bericht naar het opgegeven endpoint.
      *
-     * <p>Digikoppeling-compliant: SOAP 1.1, Message mode, zonder WSDL. Voor HTTPS-endpoints
+            SOAPMessage soapMessage = MessageFactory.newInstance().createMessage(
      * wordt de partner-mTLS-trust real-time opgebouwd via de CPA-registry.
      * Bij een SOAP Fault, ontbrekend partnercertificaat of verbindingsfout wordt een
      * {@link EbmsException} gegooid.
@@ -98,34 +88,12 @@ public class OutboundSoapClient {
             endpointUrl, cpaId, toPartyId);
         try {
             // ── 1. SOAPMessage reconstrueren uit string ────────────────────
-            SOAPMessage soapMessage = MessageFactory.newInstance().createMessage(
+            MessageFactory.newInstance().createMessage(
                 new MimeHeaders(),
                 new ByteArrayInputStream(rawSoapXml.getBytes(StandardCharsets.UTF_8)));
 
-            // ── 2. CXF Dispatch aanmaken (geen WSDL vereist) ──────────────
-            Service service = Service.create(SERVICE_NAME);
-            service.addPort(PORT_NAME,
-                jakarta.xml.ws.soap.SOAPBinding.SOAP11HTTP_BINDING,
-                endpointUrl);
-
-            Dispatch<SOAPMessage> dispatch = service.createDispatch(
-                PORT_NAME,
-                SOAPMessage.class,
-                Service.Mode.MESSAGE);
-
-            configureSoapAction(dispatch, soapMessage);
-
-            // ── 3. Timeouts instellen via CXF HTTPConduit ─────────────────
-            configureTimeouts(dispatch);
-
-            // ── 4. mTLS configureren (dynamische CPA-trust, alleen voor HTTPS) ─
-            if (isHttps(endpointUrl)) {
-                SSLContext dynamicSslContext = buildDynamicSslContext(cpaId, toPartyId);
-                configureMtls(dispatch, dynamicSslContext);
-            }
-
-            // ── 5. Bericht verzenden ──────────────────────────────────────
-            SOAPMessage response = invoke(dispatch, soapMessage, endpointUrl);
+            // ── 2. Bericht verzenden ──────────────────────────────────────
+            SOAPMessage response = invoke(endpointUrl, rawSoapXml, cpaId, toPartyId);
 
             // ── 6. SOAP Fault check ───────────────────────────────────────
             if (response != null && response.getSOAPBody() != null
@@ -154,20 +122,6 @@ public class OutboundSoapClient {
 
         } catch (EbmsException e) {
             throw e;
-        } catch (SOAPFaultException e) {
-            if (isResponseParsingFailure(e)) {
-                Throwable rootCause = rootCause(e);
-                log.error("[OUTBOUND] Ongeldige SOAP-response ontvangen van endpoint={} oorzaak={} bericht={}",
-                    endpointUrl, rootCause.getClass().getSimpleName(), rootCause.getMessage(), e);
-                throw new EbmsException("CONNECTION_ERROR",
-                    "SOAP-response van " + endpointUrl + " kon niet worden gelezen: "
-                        + describeFailure(e));
-            }
-            String fault = describeSoapFault(e);
-            log.error("[OUTBOUND] SOAP Fault ontvangen van endpoint={} details={}",
-                endpointUrl, fault, e);
-            throw new EbmsException("SOAP_FAULT",
-                "SOAP Fault van partner endpoint (" + endpointUrl + "): " + fault);
         } catch (Exception e) {
             Throwable rootCause = rootCause(e);
             log.error("[OUTBOUND] Verzending mislukt naar endpoint={} oorzaak={} bericht={}",
@@ -183,21 +137,52 @@ public class OutboundSoapClient {
         return endpointUrl != null && endpointUrl.toLowerCase().startsWith("https");
     }
 
-    private SOAPMessage invoke(Dispatch<SOAPMessage> dispatch, SOAPMessage soapMessage, String endpointUrl) {
+    private long resolveConnectTimeoutMs() {
+        return connectTimeoutMs > 0 ? connectTimeoutMs : DEFAULT_CONNECT_TIMEOUT_MS;
+    }
+
+    private long resolveReadTimeoutMs() {
+        return readTimeoutMs > 0 ? readTimeoutMs : DEFAULT_READ_TIMEOUT_MS;
+    }
+
+    private SOAPMessage invoke(String endpointUrl, String rawSoapXml, String cpaId, String toPartyId) {
         try {
-            return dispatch.invoke(soapMessage);
-        } catch (SOAPFaultException e) {
-            if (isResponseParsingFailure(e) && isNoContentResponse(dispatch)) {
+            HttpClient.Builder clientBuilder = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofMillis(resolveConnectTimeoutMs()));
+            if (isHttps(endpointUrl)) {
+                clientBuilder.sslContext(buildDynamicSslContext(cpaId, toPartyId));
+            }
+
+            HttpRequest request = HttpRequest.newBuilder(URI.create(endpointUrl))
+                .timeout(Duration.ofMillis(resolveReadTimeoutMs()))
+                .header("Content-Type", "text/xml; charset=UTF-8")
+                .header("SOAPAction", '"' + EBMS_SOAP_ACTION + '"')
+                .POST(HttpRequest.BodyPublishers.ofString(rawSoapXml, StandardCharsets.UTF_8))
+                .build();
+
+            HttpResponse<String> response = clientBuilder.build()
+                .send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            int statusCode = response.statusCode();
+            String responseBody = response.body();
+
+            if (statusCode == 204) {
                 log.info("[OUTBOUND] HTTP 204 No Content ontvangen van endpoint={}; geen SOAP-response te parsen", endpointUrl);
                 return null;
             }
-            throw e;
-        }
-    }
+            if (responseBody == null || responseBody.isBlank()) {
+                throw new EbmsException("CONNECTION_ERROR",
+                    "SOAP-response van " + endpointUrl + " was leeg (HTTP " + statusCode + ")");
+            }
 
-    private boolean isNoContentResponse(Dispatch<SOAPMessage> dispatch) {
-        Object statusCode = ((BindingProvider) dispatch).getResponseContext().get(MessageContext.HTTP_RESPONSE_CODE);
-        return statusCode instanceof Number number && number.intValue() == 204;
+            return MessageFactory.newInstance().createMessage(
+                new MimeHeaders(),
+                new ByteArrayInputStream(responseBody.getBytes(StandardCharsets.UTF_8)));
+        } catch (EbmsException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new EbmsException("CONNECTION_ERROR",
+                "SOAP-response van " + endpointUrl + " kon niet worden gelezen: " + describeFailure(e));
+        }
     }
 
     private Throwable rootCause(Throwable failure) {
@@ -208,57 +193,11 @@ public class OutboundSoapClient {
         return cause;
     }
 
-    private boolean isResponseParsingFailure(Throwable failure) {
-        return rootCause(failure) instanceof XMLStreamException;
-    }
-
     private String describeFailure(Throwable failure) {
         Throwable rootCause = rootCause(failure);
         String message = rootCause.getMessage();
         return rootCause.getClass().getSimpleName()
             + (message == null || message.isBlank() ? "" : ": " + message);
-    }
-
-    private String describeSoapFault(SOAPFaultException failure) {
-        var soapFault = failure.getFault();
-        if (soapFault == null) {
-            return describeFailure(failure);
-        }
-
-        String faultCode = soapFault.getFaultCode();
-        String faultString = soapFault.getFaultString();
-        String detail = soapFault.getDetail() == null
-            ? null
-            : soapFault.getDetail().getTextContent();
-        StringBuilder description = new StringBuilder();
-        appendFaultPart(description, "code", faultCode);
-        appendFaultPart(description, "message", faultString);
-        appendFaultPart(description, "detail", detail);
-        return description.length() == 0 ? describeFailure(failure) : description.toString();
-    }
-
-    private void appendFaultPart(StringBuilder description, String name, String value) {
-        if (value != null && !value.isBlank()) {
-            if (description.length() > 0) {
-                description.append(", ");
-            }
-            description.append(name).append('=').append(value.trim());
-        }
-    }
-
-    /** Configureert de vaste ebMS2 SOAP 1.1 HTTP-action. */
-    private void configureSoapAction(Dispatch<SOAPMessage> dispatch, SOAPMessage soapMessage) {
-        try {
-            dispatch.getRequestContext().put(BindingProvider.SOAPACTION_USE_PROPERTY, Boolean.TRUE);
-            dispatch.getRequestContext().put(BindingProvider.SOAPACTION_URI_PROPERTY, EBMS_SOAP_ACTION);
-            soapMessage.getMimeHeaders().setHeader("SOAPAction", '"' + EBMS_SOAP_ACTION + '"');
-            soapMessage.saveChanges();
-            log.debug("[OUTBOUND] SOAPAction ingesteld: \"{}\"", EBMS_SOAP_ACTION);
-        } catch (EbmsException e) {
-            throw e;
-        } catch (Exception e) {
-            throw new EbmsException("INVALID_HEADER", "Kon eb:Action niet bepalen: " + e.getMessage());
-        }
     }
 
     /**
@@ -320,58 +259,4 @@ public class OutboundSoapClient {
         }
     }
 
-    /**
-     * Haalt de onderliggende CXF {@link Client} op uit een {@link Dispatch}.
-     * {@code ClientProxy.getClient()} werkt alleen voor WSDL-gegenereerde proxy-clients (een JDK
-     * dynamic proxy) - onze WSDL-loze {@code Dispatch} (via {@code service.createDispatch()}) is
-     * een concrete klasse ({@code DispatchImpl}), geen proxy, en gaf daardoor altijd
-     * "not a proxy instance" terug. Voor timeouts was dat cosmetisch (fallback via
-     * request-context bleef werken), maar voor mTLS is er geen fallback - elke HTTPS-verzending
-     * (bv. naar een Digikoppeling/Logius-compliance-endpoint) faalde daardoor hard.
-     */
-    private Client getCxfClient(Dispatch<SOAPMessage> dispatch) {
-        return ((DispatchImpl<?>) dispatch).getClient();
-    }
-
-    /**
-     * Configureert connect- en read-timeouts via de CXF HTTPConduit.
-     * Voorkomt thread-exhaustion bij trage externe overheidsvoorzieningen (BIO vereiste).
-     */
-    private void configureTimeouts(Dispatch<SOAPMessage> dispatch) {
-        try {
-            Client client = getCxfClient(dispatch);
-            HTTPConduit conduit = (HTTPConduit) client.getConduit();
-            HTTPClientPolicy policy = new HTTPClientPolicy();
-            policy.setConnectionTimeout(connectTimeoutMs);
-            policy.setReceiveTimeout(readTimeoutMs);
-            conduit.setClient(policy);
-            log.debug("[OUTBOUND] Timeouts: connect={}ms read={}ms", connectTimeoutMs, readTimeoutMs);
-        } catch (Exception e) {
-            // Fallback: stel via request context in (werkt voor JAX-WS RI)
-            log.warn("[OUTBOUND] CXF HTTPConduit niet beschikbaar – fallback timeout: {}", e.getMessage());
-            dispatch.getRequestContext().put("javax.xml.ws.client.connectionTimeout", connectTimeoutMs);
-            dispatch.getRequestContext().put("javax.xml.ws.client.receiveTimeout", readTimeoutMs);
-        }
-    }
-
-    /**
-     * Configureert mTLS via SSLContext-injectie in de CXF HTTPConduit.
-     *
-     * <p>Fail-closed: als de injectie mislukt, wordt de verzending afgebroken i.p.v. stilletjes
-     * terug te vallen op plain TLS (voorkomt het versturen van gevoelige data zonder mTLS).
-     */
-    private void configureMtls(Dispatch<SOAPMessage> dispatch, SSLContext sslContext) {
-        try {
-            Client client = getCxfClient(dispatch);
-            HTTPConduit conduit = (HTTPConduit) client.getConduit();
-            org.apache.cxf.configuration.jsse.TLSClientParameters tlsParams =
-                new org.apache.cxf.configuration.jsse.TLSClientParameters();
-            tlsParams.setSSLSocketFactory(sslContext.getSocketFactory());
-            conduit.setTlsClientParameters(tlsParams);
-            log.debug("[OUTBOUND] mTLS geconfigureerd via dynamische SSLContext");
-        } catch (Exception e) {
-            log.error("[OUTBOUND] mTLS-configuratie mislukt: {}", e.getMessage());
-            throw new EbmsException("MTLS_CONFIG_ERROR", "mTLS-configuratie mislukt: " + e.getMessage());
-        }
-    }
 }

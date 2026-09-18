@@ -107,6 +107,7 @@ public class OutboundMessageService {
             DeliveryChannelDto channel = route.getChannel();
             EbxmlProfile profile = EbxmlProfile.fromCode(channel.getDkProfile());
             boolean requireAck = profile.hasReliableMessaging();
+            boolean awaitAsyncSignal = isAsyncReplyMode(channel);
             boolean requireSignature = route.isSignatureRequired() || profile.requiresSigning();
 
             // ── 2. SOAP-envelop opbouwen ──────────────────────────────────
@@ -135,8 +136,9 @@ public class OutboundMessageService {
             outboundSoapClient.send(channel.getEndpointUrl(), rawSoapXml, cpaId, toPartyId);
 
             // ── 7. Status-machine bijwerken ────────────────────────────────
-            trackingService.markSentOrDelivered(messageId, requireAck);
-            log.info("[OUTBOUND] Verzonden ({}): messageId={}", requireAck ? "RM – wacht op ACK" : "BE – DELIVERED", messageId);
+            trackingService.markSentOrDelivered(messageId, requireAck || awaitAsyncSignal);
+            log.info("[OUTBOUND] Verzonden ({}): messageId={}",
+                requireAck || awaitAsyncSignal ? "wacht op async MSH-signaal" : "BE – DELIVERED", messageId);
 
             // ── 8. Audit-event publiceren ──────────────────────────────────
             publishAudit(AuditEvent.builder()
@@ -237,6 +239,10 @@ public class OutboundMessageService {
                     + "', verwacht='" + cpaRole + "'");
         }
         return cpaRole;
+    }
+
+    private boolean isAsyncReplyMode(DeliveryChannelDto channel) {
+        return channel != null && "none".equalsIgnoreCase(channel.getSyncReplyMode());
     }
 
     private void publishAudit(AuditEvent event) {

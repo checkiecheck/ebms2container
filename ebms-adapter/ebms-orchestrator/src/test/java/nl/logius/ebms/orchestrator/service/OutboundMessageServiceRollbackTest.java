@@ -181,6 +181,30 @@ class OutboundMessageServiceRollbackTest {
     }
 
     @Test
+    @DisplayName("Happy path + syncReplyMode=none → SENT, wacht op async MSH-signaal")
+    void happyPath_asyncReplyMode_marksSentUntilAsyncSignalArrives() throws Exception {
+        DeliveryChannelDto channel = DeliveryChannelDto.builder()
+            .endpointUrl("https://partner.example/ebms")
+            .dkProfile("osb-be")
+            .syncReplyMode("none")
+            .persistDuration(3600)
+            .build();
+        when(cpaChannelCacheService.getOutboundRoute(
+            anyString(), anyString(), anyString(), anyString(), any(), anyString(), any(), any()))
+            .thenReturn(OutboundRouteDto.builder()
+                .fromRole("Sender")
+                .toRole("Receiver")
+                .channel(channel)
+                .build());
+
+        service.handleOutboundMessage(outboundMessage, amqpChannel, 790L);
+
+        verify(trackingService, times(1)).markSentOrDelivered("msg-42", true);
+        verify(trackingService, never()).markFailed(anyString(), anyString());
+        verify(amqpChannel, times(1)).basicAck(anyLong(), anyBoolean());
+    }
+
+    @Test
     void missingRoles_areFilledFromExactCpaRouteBeforeSoapCreation() throws Exception {
         outboundMessage.getHeader().setFromRole(null);
         outboundMessage.getHeader().setToRole(null);

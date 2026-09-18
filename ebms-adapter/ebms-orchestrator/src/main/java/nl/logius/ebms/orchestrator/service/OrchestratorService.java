@@ -57,6 +57,7 @@ public class OrchestratorService {
     private final CryptoServiceClient   cryptoServiceClient;
     private final RetryProperties       retryProperties;
     private final InboundMessageTrackingService trackingService;
+    private final OutboundMessageTrackingService outboundTrackingService;
     private final AckSendingService     ackSendingService;
 
     @Value("${ebms.inbound.decryption-key-alias:encryption-key}")
@@ -157,6 +158,7 @@ public class OrchestratorService {
             // systeemsignalen zijn door de orchestrator zelf verwerkt.
             if (isMessageError(header)) {
                 trackingService.markProcessed(messageId);
+                markReferencedOutboundFailed(header, request);
             } else {
                 trackingService.markDelivered(messageId);
             }
@@ -293,6 +295,24 @@ public class OrchestratorService {
         return header.getService() != null
             && SoapHelper.EBXML_PING_SERVICE.equals(header.getService().getValue())
             && "MessageError".equalsIgnoreCase(header.getAction());
+    }
+
+    private void markReferencedOutboundFailed(EbxmlMessageHeader header, SOAPMessage request) {
+        String refToMessageId = header.getMessageInfo() != null
+            ? header.getMessageInfo().getRefToMessageId() : null;
+        if (refToMessageId == null || refToMessageId.isBlank()) {
+            log.warn("[MESSAGE-ERROR] Geen RefToMessageId ontvangen voor messageId={}",
+                header.getMessageInfo() != null ? header.getMessageInfo().getMessageId() : null);
+            return;
+        }
+
+        SoapHelper.EbxmlError ebxmlError = soapHelper.parseErrorList(request);
+        String errorCode = ebxmlError != null ? ebxmlError.errorCode() : "EBXML_ERROR";
+        String description = ebxmlError != null ? ebxmlError.description() : "Async MessageError ontvangen";
+        outboundTrackingService.markFailed(refToMessageId,
+            "[PARTNER_REJECTED] Async ebXML MessageError: [" + errorCode + "] " + description);
+        log.warn("[MESSAGE-ERROR] Outbound bericht {} gemarkeerd als FAILED: [{}] {}",
+            refToMessageId, errorCode, description);
     }
 
     // ── Scheduled taken ───────────────────────────────────────────────────

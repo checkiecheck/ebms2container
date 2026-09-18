@@ -69,6 +69,7 @@ class OrchestratorServiceReliableMessagingResponseTest {
     @Mock CryptoServiceClient cryptoServiceClient;
     @Mock nl.logius.ebms.orchestrator.config.RetryProperties retryProperties;
     @Mock InboundMessageTrackingService trackingService;
+    @Mock OutboundMessageTrackingService outboundTrackingService;
     @Mock AckSendingService ackSendingService;
 
     @InjectMocks OrchestratorService service;
@@ -217,6 +218,9 @@ class OrchestratorServiceReliableMessagingResponseTest {
         EbxmlMessageHeader h = header(false);
         h.setService(ServiceType.builder().value(SoapHelper.EBXML_PING_SERVICE).build());
         h.setAction("MessageError");
+        h.getMessageInfo().setRefToMessageId("outbound-ref-1");
+        when(soapHelper.parseErrorList(request))
+            .thenReturn(new SoapHelper.EbxmlError("SecurityFailure", "Invalid DigestMethod."));
 
         SOAPMessage response = service.processInboundMessage(request, h, "<raw-error/>", FROM_OIN);
 
@@ -224,6 +228,8 @@ class OrchestratorServiceReliableMessagingResponseTest {
         verify(trackingService).persistReceived(h, "<raw-error/>", FROM_OIN);
         verify(trackingService).markProcessed(MESSAGE_ID);
         verify(trackingService, never()).markDelivered(MESSAGE_ID);
+        verify(outboundTrackingService).markFailed("outbound-ref-1",
+            "[PARTNER_REJECTED] Async ebXML MessageError: [SecurityFailure] Invalid DigestMethod.");
     }
 
     // ── Gap 1: Duplicate suppression met cached-response reuse ─────────────
