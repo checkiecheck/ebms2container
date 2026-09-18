@@ -216,6 +216,7 @@ private static String getLenientAttribute(Element element, String attributeName)
             Document document = parseDocument(cpaXml);
             Map<String, ActionBinding> bindingsById = new HashMap<>();
             Map<String, String> channelOwners = new HashMap<>();
+            Map<String, SecurityConfig> securityByChannel = new HashMap<>();
             List<ActionBinding> sendBindings = new ArrayList<>();
 
             NodeList partyNodes = document.getElementsByTagNameNS("*", "PartyInfo");
@@ -231,6 +232,10 @@ private static String getLenientAttribute(Element element, String attributeName)
                     String channelId = blankToNull(getLenientAttribute(channel, "channelId"));
                     if (channelId != null) {
                         channelOwners.put(channelId, partyId);
+                        String docExchangeId = getLenientAttribute(channel, "docExchangeId");
+                        Element docExchange = docExchangeId == null
+                            ? null : descendantByAttribute(party, "DocExchange", "docExchangeId", docExchangeId);
+                        securityByChannel.put(channelId, parseSecurityConfig(docExchange));
                     }
                 }
 
@@ -285,6 +290,12 @@ private static String getLenientAttribute(Element element, String attributeName)
                         .actionBindingId(sender.id())
                         .fromRole(sender.role())
                         .toRole(receiver.role())
+                        .signatureRequired(securityByChannel.getOrDefault(
+                            channelId, SecurityConfig.NONE).signatureRequired())
+                        .hashFunction(securityByChannel.getOrDefault(
+                            channelId, SecurityConfig.NONE).hashFunction())
+                        .signatureAlgorithm(securityByChannel.getOrDefault(
+                            channelId, SecurityConfig.NONE).signatureAlgorithm())
                         .channelPartyId(channelPartyId)
                         .channelId(channelId)
                         .build());
@@ -360,6 +371,55 @@ private static String getLenientAttribute(Element element, String attributeName)
         return children.isEmpty() ? null : children.get(0);
     }
 
+    private Element descendantByAttribute(Element parent, String elementName,
+            String attributeName, String expectedValue) {
+        for (Element element : descendants(parent, elementName)) {
+            if (expectedValue.equals(getLenientAttribute(element, attributeName))) {
+                return element;
+            }
+        }
+        return null;
+    }
+
+    private SecurityConfig parseSecurityConfig(Element docExchange) {
+        if (docExchange == null) return SecurityConfig.NONE;
+        Element nonRepudiation = firstDescendant(docExchange, "SenderNonRepudiation");
+        if (nonRepudiation == null) {
+            nonRepudiation = firstDescendant(docExchange, "ReceiverNonRepudiation");
+        }
+        if (nonRepudiation == null) return SecurityConfig.NONE;
+        return new SecurityConfig(true,
+            normalizeHashFunction(textOf(firstDescendant(nonRepudiation, "HashFunction"))),
+            normalizeSignatureAlgorithm(
+                textOf(firstDescendant(nonRepudiation, "SignatureAlgorithm"))));
+    }
+
+    private String normalizeHashFunction(String value) {
+        if (value == null || value.isBlank()) return null;
+        String normalized = value.trim().toLowerCase(java.util.Locale.ROOT);
+        return switch (normalized) {
+            case "sha1", "sha-1", "http://www.w3.org/2000/09/xmldsig#sha1" ->
+                "http://www.w3.org/2000/09/xmldsig#sha1";
+            case "sha256", "sha-256", "http://www.w3.org/2001/04/xmlenc#sha256" ->
+                "http://www.w3.org/2001/04/xmlenc#sha256";
+            default -> value.trim();
+        };
+    }
+
+    private String normalizeSignatureAlgorithm(String value) {
+        if (value == null || value.isBlank()) return null;
+        String normalized = value.trim().toLowerCase(java.util.Locale.ROOT);
+        return switch (normalized) {
+            case "rsa-sha1", "rsa_sha1", "http://www.w3.org/2000/09/xmldsig#rsa-sha1" ->
+                "http://www.w3.org/2000/09/xmldsig#rsa-sha1";
+            case "rsa-sha256", "rsa_sha256", "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256" ->
+                "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256";
+            case "ecdsa-sha256", "ecdsa_sha256", "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256" ->
+                "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256";
+            default -> value.trim();
+        };
+    }
+
     private record ActionBinding(String id, String partyId, String role, String service,
                                  String serviceType, String action, String otherBindingId,
                                  List<String> channelIds, boolean send) {
@@ -372,6 +432,11 @@ private static String getLenientAttribute(Element element, String attributeName)
             return id != null && partyId != null && role != null && service != null
                 && action != null && !channelIds.isEmpty();
         }
+    }
+
+    private record SecurityConfig(boolean signatureRequired, String hashFunction,
+                                  String signatureAlgorithm) {
+        private static final SecurityConfig NONE = new SecurityConfig(false, null, null);
     }
 
     // ── Certificaat-extractie ────────────────────────────────────────────

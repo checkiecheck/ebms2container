@@ -107,16 +107,18 @@ public class OutboundMessageService {
             DeliveryChannelDto channel = route.getChannel();
             EbxmlProfile profile = EbxmlProfile.fromCode(channel.getDkProfile());
             boolean requireAck = profile.hasReliableMessaging();
+            boolean requireSignature = route.isSignatureRequired() || profile.requiresSigning();
 
             // ── 2. SOAP-envelop opbouwen ──────────────────────────────────
             SOAPMessage soapMsg = soapHelper.buildOutboundSoap(header, requireAck);
             String rawSoapXml = soapHelper.soapToString(soapMsg);
 
             // ── 3. Signing (indien vereist door profiel) ───────────────────
-            if (profile.requiresSigning()) {
+            if (requireSignature) {
                 String signingAlias = defaultSigningKeyAlias;
                 log.debug("[OUTBOUND] Signing: messageId={} alias={}", messageId, signingAlias);
-                rawSoapXml = cryptoServiceClient.sign(rawSoapXml, signingAlias, messageId);
+                rawSoapXml = cryptoServiceClient.sign(rawSoapXml, signingAlias, messageId,
+                    route.getHashFunction(), route.getSignatureAlgorithm());
             }
 
             // ── 4. Encryptie (indien vereist door profiel) ─────────────────

@@ -98,6 +98,29 @@ class XmlSigningServiceTest {
         assertThat(sigParent.getNamespaceURI()).isEqualTo(SOAP11_NS);
     }
 
+    @Test
+    void sign_withExplicitRsaSha1_usesLegacyAlgorithmsAndStillSigns() throws Exception {
+        String soapXml =
+            "<soapenv:Envelope xmlns:soapenv=\"" + SOAP11_NS + "\">" +
+            "  <soapenv:Header/>" +
+            "  <soapenv:Body><Ping>hi</Ping></soapenv:Body>" +
+            "</soapenv:Envelope>";
+
+        String signed = service.sign(soapXml, ALIAS, "msg-sha1",
+            "http://www.w3.org/2000/09/xmldsig#sha1",
+            "http://www.w3.org/2000/09/xmldsig#rsa-sha1");
+
+        Document document = parse(signed);
+        Element signature = (Element) document
+            .getElementsByTagNameNS(Constants.SignatureSpecNS, "Signature").item(0);
+        assertThat(signature.getElementsByTagNameNS(Constants.SignatureSpecNS, "SignatureMethod")
+            .item(0).getAttributes().getNamedItem("Algorithm").getNodeValue())
+            .isEqualTo("http://www.w3.org/2000/09/xmldsig#rsa-sha1");
+        assertThat(signature.getElementsByTagNameNS(Constants.SignatureSpecNS, "DigestMethod")
+            .item(0).getAttributes().getNamedItem("Algorithm").getNodeValue())
+            .isEqualTo("http://www.w3.org/2000/09/xmldsig#sha1");
+    }
+
     // ── SOAP 1.2 with different prefix + namespace lookup ─────────────────
     @Test
     void sign_shouldAppendSignatureToSoap12Header_whenHeaderPresent() throws Exception {

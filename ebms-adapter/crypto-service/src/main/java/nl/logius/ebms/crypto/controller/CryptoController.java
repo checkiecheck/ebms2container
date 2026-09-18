@@ -52,11 +52,14 @@ public class CryptoController {
         String signedXml = xmlSigningService.sign(
             request.getXmlContent(),
             request.getKeyAlias(),
-            request.getMessageId());
+            request.getMessageId(),
+            request.getHashFunction(),
+            request.getSignatureAlgorithm());
 
         return ResponseEntity.ok(SignResponse.builder()
             .signedXml(signedXml)
             .keyAlias(request.getKeyAlias())
+            .algorithm(request.getSignatureAlgorithm())
             .messageId(request.getMessageId())
             .build());
     }

@@ -72,6 +72,11 @@ public class XmlSigningService {
      * @throws XmlSecurityException bij een ondertekeningsfout
      */
     public String sign(String xmlContent, String keyAlias, String messageId) {
+        return sign(xmlContent, keyAlias, messageId, null, null);
+        }
+
+        public String sign(String xmlContent, String keyAlias, String messageId,
+            String requestedHashFunction, String requestedSignatureAlgorithm) {
         long startMs = System.currentTimeMillis();
         try {
             Document doc = parseXml(xmlContent);
@@ -106,7 +111,12 @@ public class XmlSigningService {
             X509Certificate cert      = keyStoreService.getCertificate(keyAlias);
 
             // Bepaal algoritme op basis van sleuteltype
-            String sigAlgo = determineSignatureAlgorithm(cert);
+            String sigAlgo = requestedSignatureAlgorithm != null && !requestedSignatureAlgorithm.isBlank()
+                ? requestedSignatureAlgorithm : determineSignatureAlgorithm(cert);
+            String digestAlgo = requestedHashFunction != null && !requestedHashFunction.isBlank()
+                ? requestedHashFunction : "http://www.w3.org/2001/04/xmlenc#sha256";
+            validateAlgorithms(cert, sigAlgo, digestAlgo);
+            warnLegacyAlgorithm(messageId, sigAlgo, digestAlgo);
 
             // Maak XMLSignature aan (enveloped) en voeg toe aan de bepaalde parent
             XMLSignature signature = new XMLSignature(doc, "", sigAlgo);
@@ -120,7 +130,7 @@ public class XmlSigningService {
             // Onderteken het root-element (lege URI = geheel document)
             // SHA-256 digest URI: stabiele W3C-constante (vervangt Constants.ALGO_ID_DIGEST_SHA256
             // dat vervallen is in Santuario 3.0.6)
-            signature.addDocument("", transforms, "http://www.w3.org/2001/04/xmlenc#sha256");
+            signature.addDocument("", transforms, digestAlgo);
 
             // Voeg KeyInfo toe (certificaat voor verificatie)
             signature.addKeyInfo(cert);
@@ -266,6 +276,29 @@ public class XmlSigningService {
             case "EC"  -> XMLSignature.ALGO_ID_SIGNATURE_ECDSA_SHA256;
             default    -> XMLSignature.ALGO_ID_SIGNATURE_RSA_SHA256;
         };
+    }
+
+    private void validateAlgorithms(X509Certificate cert, String signatureAlgorithm,
+            String hashFunction) {
+        boolean rsa = "http://www.w3.org/2000/09/xmldsig#rsa-sha1".equals(signatureAlgorithm)
+            || "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256".equals(signatureAlgorithm);
+        boolean ec = "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256".equals(signatureAlgorithm);
+        boolean digest = "http://www.w3.org/2000/09/xmldsig#sha1".equals(hashFunction)
+            || "http://www.w3.org/2001/04/xmlenc#sha256".equals(hashFunction);
+        if (!digest || (!rsa && !ec)) {
+            throw new XmlSecurityException("Unsupported CPA signature or hash algorithm");
+        }
+        String keyType = cert.getPublicKey().getAlgorithm();
+        if ((rsa && !"RSA".equalsIgnoreCase(keyType)) || (ec && !"EC".equalsIgnoreCase(keyType))) {
+            throw new XmlSecurityException("CPA signature algorithm does not match signing key type");
+        }
+    }
+
+    private void warnLegacyAlgorithm(String messageId, String signatureAlgorithm, String hashFunction) {
+        if (signatureAlgorithm.contains("sha1") || hashFunction.endsWith("#sha1")) {
+            log.warn("[CRYPTO] Legacy SHA-1 algorithm detected: messageId={} signatureAlgorithm={} hashFunction={}",
+                messageId, signatureAlgorithm, hashFunction);
+        }
     }
 
     private void persistAudit(String operation, String keyAlias, String messageId,

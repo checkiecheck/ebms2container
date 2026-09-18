@@ -1,0 +1,4 @@
+ALTER TABLE cpa_outbound_route
+    ADD COLUMN IF NOT EXISTS signature_required BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS hash_function VARCHAR(255),
+    ADD COLUMN IF NOT EXISTS signature_algorithm VARCHAR(255);

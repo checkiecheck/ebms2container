@@ -167,6 +167,9 @@ public class CpaService {
             .action(route.getAction())
             .fromRole(route.getFromRole())
             .toRole(route.getToRole())
+            .signatureRequired(route.isSignatureRequired())
+            .hashFunction(route.getHashFunction())
+            .signatureAlgorithm(route.getSignatureAlgorithm())
             .channel(cpaMapper.toChannelDto(channel))
             .build();
     }

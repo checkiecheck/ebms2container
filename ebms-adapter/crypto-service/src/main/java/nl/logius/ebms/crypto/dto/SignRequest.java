@@ -25,4 +25,8 @@ public class SignRequest {
 
     /** Optioneel bericht-ID voor audit-logging. */
     private String messageId;
+
+    private String hashFunction;
+
+    private String signatureAlgorithm;
 }

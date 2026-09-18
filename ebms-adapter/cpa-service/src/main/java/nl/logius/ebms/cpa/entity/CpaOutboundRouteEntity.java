@@ -60,6 +60,16 @@ public class CpaOutboundRouteEntity {
     @Column(name = "to_role", nullable = false, length = 100)
     private String toRole;
 
+    @Column(name = "signature_required", nullable = false)
+    @Builder.Default
+    private boolean signatureRequired = false;
+
+    @Column(name = "hash_function", length = 255)
+    private String hashFunction;
+
+    @Column(name = "signature_algorithm", length = 255)
+    private String signatureAlgorithm;
+
     @Column(name = "channel_party_id", nullable = false, length = 255)
     private String channelPartyId;
 

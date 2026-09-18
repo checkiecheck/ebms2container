@@ -48,14 +48,26 @@ public class CryptoServiceClient {
      * @throws XmlSecurityException bij fout in de crypto-service
      */
     public String sign(String xmlContent, String keyAlias, String messageId) {
+        return sign(xmlContent, keyAlias, messageId, null, null);
+    }
+
+    public String sign(String xmlContent, String keyAlias, String messageId,
+            String hashFunction, String signatureAlgorithm) {
         log.debug("[CRYPTO] Ondertekenen: messageId={} keyAlias={}", messageId, keyAlias);
         try {
+            Map<String, String> request = new java.util.HashMap<>();
+            request.put("xmlContent", xmlContent);
+            request.put("keyAlias", keyAlias);
+            request.put("messageId", messageId);
+            if (hashFunction != null && !hashFunction.isBlank()) {
+                request.put("hashFunction", hashFunction);
+            }
+            if (signatureAlgorithm != null && !signatureAlgorithm.isBlank()) {
+                request.put("signatureAlgorithm", signatureAlgorithm);
+            }
             ResponseEntity<SignResponse> response = cryptoRestClient.post()
                 .uri("/api/crypto/sign")
-                .body(Map.of(
-                    "xmlContent", xmlContent,
-                    "keyAlias",   keyAlias,
-                    "messageId",  messageId))
+                .body(request)
                 .retrieve()
                 .toEntity(SignResponse.class);
 

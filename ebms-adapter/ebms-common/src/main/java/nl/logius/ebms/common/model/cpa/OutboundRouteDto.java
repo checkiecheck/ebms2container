@@ -23,5 +23,8 @@ public class OutboundRouteDto {
     private String action;
     private String fromRole;
     private String toRole;
+    private boolean signatureRequired;
+    private String hashFunction;
+    private String signatureAlgorithm;
     private DeliveryChannelDto channel;
 }

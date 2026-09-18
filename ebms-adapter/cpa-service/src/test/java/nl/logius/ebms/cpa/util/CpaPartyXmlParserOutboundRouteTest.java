@@ -34,7 +34,13 @@ class CpaPartyXmlParserOutboundRouteTest {
               </tp:PartyInfo>
               <tp:PartyInfo>
                 <tp:PartyId>receiver</tp:PartyId>
-                <tp:DeliveryChannel tp:channelId="receiver-channel"/>
+                <tp:DeliveryChannel tp:channelId="receiver-channel" tp:docExchangeId="receiver-dx"/>
+                <tp:DocExchange tp:docExchangeId="receiver-dx">
+                  <tp:SenderNonRepudiation>
+                    <tp:HashFunction>SHA-1</tp:HashFunction>
+                    <tp:SignatureAlgorithm>RSA-SHA1</tp:SignatureAlgorithm>
+                  </tp:SenderNonRepudiation>
+                </tp:DocExchange>
                 <tp:CollaborationRole>
                   <tp:Role tp:name="ResponderROLE"/>
                   <tp:ServiceBinding>
@@ -61,6 +67,11 @@ class CpaPartyXmlParserOutboundRouteTest {
             assertThat(route.getServiceType()).isEqualTo("urn:test:service-type");
             assertThat(route.getAction()).isEqualTo("Submit");
             assertThat(route.getActionBindingId()).isEqualTo("send-submit");
+            assertThat(route.isSignatureRequired()).isTrue();
+            assertThat(route.getHashFunction())
+              .isEqualTo("http://www.w3.org/2000/09/xmldsig#sha1");
+            assertThat(route.getSignatureAlgorithm())
+              .isEqualTo("http://www.w3.org/2000/09/xmldsig#rsa-sha1");
             assertThat(route.getFromRole()).isEqualTo("InitiatorRole");
             assertThat(route.getToRole()).isEqualTo("ResponderROLE");
             assertThat(route.getChannelPartyId()).isEqualTo("receiver");
