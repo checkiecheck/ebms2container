@@ -153,8 +153,13 @@ public class OrchestratorService {
                 .result("SUCCESS")
                 .build());
 
-            // 8. Update status naar DELIVERED (succesvol op AMQP inbound-queue gepubliceerd)
-            trackingService.markDelivered(messageId);
+            // 8. Terminale status bijwerken: businessberichten zijn afgeleverd, ebMS-
+            // systeemsignalen zijn door de orchestrator zelf verwerkt.
+            if (isMessageError(header)) {
+                trackingService.markProcessed(messageId);
+            } else {
+                trackingService.markDelivered(messageId);
+            }
 
             // 9. Construeer en retourneer respons: synchrone ACK, of een lege respons + een
             //    losse asynchrone ACK op de achtergrond (CPA syncReplyMode="none" - Digikoppeling-
@@ -282,6 +287,12 @@ public class OrchestratorService {
                 + "synchrone ACK blijft van kracht: {}", cpaId, fromPartyId, e.getMessage());
             return false;
         }
+    }
+
+    private boolean isMessageError(EbxmlMessageHeader header) {
+        return header.getService() != null
+            && SoapHelper.EBXML_PING_SERVICE.equals(header.getService().getValue())
+            && "MessageError".equalsIgnoreCase(header.getAction());
     }
 
     // ── Scheduled taken ───────────────────────────────────────────────────

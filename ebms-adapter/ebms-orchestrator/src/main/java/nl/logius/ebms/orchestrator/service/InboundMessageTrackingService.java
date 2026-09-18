@@ -57,6 +57,15 @@ public class InboundMessageTrackingService {
         }, () -> log.warn("[INBOUND] Kon status niet bijwerken naar DELIVERED: geen rij voor messageId={}", messageId));
     }
 
+    /** Zet de rij op PROCESSED voor succesvol afgehandelde ebMS-systeemsignalen. */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void markProcessed(String messageId) {
+        findExistingInbound(messageId).ifPresentOrElse(entity -> {
+            entity.setStatus(MessageStatus.PROCESSED);
+            messageRepository.save(entity);
+        }, () -> log.warn("[INBOUND] Kon status niet bijwerken naar PROCESSED: geen rij voor messageId={}", messageId));
+    }
+
     /**
      * Registreert een gedetecteerd duplicaat op het bestaande bericht, zonder de originele rij te
      * overschrijven (status/content blijven ongewijzigd - zie {@link MessageStatus#DUPLICATE}

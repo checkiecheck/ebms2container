@@ -76,7 +76,7 @@ public interface EbmsMessageRepository extends JpaRepository<EbmsMessageEntity, 
         SELECT m FROM EbmsMessageEntity m
         WHERE m.timeToLive IS NOT NULL
           AND m.timeToLive < :now
-          AND m.status NOT IN ('DELIVERED', 'ACKNOWLEDGED', 'FAILED', 'DUPLICATE')
+          AND m.status NOT IN ('DELIVERED', 'PROCESSED', 'ACKNOWLEDGED', 'FAILED', 'DUPLICATE')
         """)
     List<EbmsMessageEntity> findExpiredMessages(@Param("now") Instant now);
 

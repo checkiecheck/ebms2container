@@ -211,6 +211,21 @@ class OrchestratorServiceReliableMessagingResponseTest {
         verify(ackSendingService, never()).sendAsyncAck(any(), any(), any());
     }
 
+    @Test
+    @DisplayName("MessageError system signal -> PROCESSED, niet DELIVERED")
+    void messageError_isMarkedProcessedInsteadOfDelivered() {
+        EbxmlMessageHeader h = header(false);
+        h.setService(ServiceType.builder().value(SoapHelper.EBXML_PING_SERVICE).build());
+        h.setAction("MessageError");
+
+        SOAPMessage response = service.processInboundMessage(request, h, "<raw-error/>", FROM_OIN);
+
+        assertThat(response).isSameAs(emptyResponse);
+        verify(trackingService).persistReceived(h, "<raw-error/>", FROM_OIN);
+        verify(trackingService).markProcessed(MESSAGE_ID);
+        verify(trackingService, never()).markDelivered(MESSAGE_ID);
+    }
+
     // ── Gap 1: Duplicate suppression met cached-response reuse ─────────────
 
     @Test

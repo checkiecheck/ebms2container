@@ -18,6 +18,9 @@ public enum MessageStatus {
     /** Succesvol afgeleverd aan de backoffice / doorstuursysteem. */
     DELIVERED,
 
+    /** ebMS-systeemsignaal succesvol verwerkt door de orchestrator. */
+    PROCESSED,
+
     /** ACK ontvangen van de ontvangende partij (alleen bij rm-profielen). */
     ACKNOWLEDGED,
 
