@@ -1,10 +1,11 @@
 # Integraal Deployment & Integratie Handboek: ebms2container Adapter
-**Versie:** 4.0 (Productie, OpenShift Routes, Parametriseerbare CI/CD & Logius Compliance Dual-Setup)
+**Versie:** 5.0 (Productie, OpenShift Routes, Certificaat-Matrix & Logius Compliance Dual-Setup)
 
 Dit handboek beschrijft de volledige deployment en configuratie van de container-native ebMS2 Digikoppeling adapter. Er wordt een strikt en expliciet onderscheid gemaakt tussen:
 1. **Generieke / Productie-omgeving:** De universele uitrolregels voor productie/OTAP (met PKIoverheid certificaten, echte Digipoort/Logius endpoints en e-Herkenning/OIN's).
-2. **OpenShift Integratie:** Kant-en-klare Red Hat OpenShift `Route` manifesten voor mTLS passthrough en REST management routes.
-3. **Logius Compliance / Testsuite-omgeving:** De specifieke configuratie, cert-conversies en mTLS-stubbing die nodig zijn voor het draaien tegen de officiële Logius Compliance Testsuite / Simulator.
+2. **Certificaatbeheer Matrix:** Een integraal overzicht van secrets, aliassen en keystore-parameters per omgeving (Dev/Test/Compliance/Prod).
+3. **OpenShift Integratie:** Kant-en-klare Red Hat OpenShift `Route` manifesten voor mTLS passthrough en REST management routes.
+4. **Logius Compliance / Testsuite-omgeving:** De specifieke configuratie, cert-conversies en mTLS-stubbing die nodig zijn voor het draaien tegen de officiële Logius Compliance Testsuite / Simulator.
 
 ---
 
@@ -17,9 +18,9 @@ Dit handboek beschrijft de volledige deployment en configuratie van de container
   - `orchestrator`: Beheert de atomaire status van in- en uitgaande berichten en de audit-trail.
 - **Rechten:** De database-user (`karavan` of productie-user) heeft volledige DDL/DML-rechten (CREATE, ALTER, SELECT, INSERT, UPDATE) op alle drie de schema's ter behoeve van automatische Flyway-migraties.
 - **JDBC Configuratie:** Injectie via omgevingsvariabelen met expliciete `currentSchema` parameters:
-  - CPA: `jdbc:postgresql://<db-host>:5432/karavan?currentSchema=cpa&stringtype=unspecified`
-  - Crypto: `jdbc:postgresql://<db-host>:5432/karavan?currentSchema=crypto&stringtype=unspecified`
-  - Orchestrator: `jdbc:postgresql://<db-host>:5432/karavan?currentSchema=orchestrator&stringtype=unspecified`
+  - CPA: `jdbc:postgresql://${DB_HOST}:${DB_PORT}/${DB_NAME}?currentSchema=cpa&stringtype=unspecified`
+  - Crypto: `jdbc:postgresql://${DB_HOST}:${DB_PORT}/${DB_NAME}?currentSchema=crypto&stringtype=unspecified`
+  - Orchestrator: `jdbc:postgresql://${DB_HOST}:${DB_PORT}/${DB_NAME}?currentSchema=orchestrator&stringtype=unspecified`
 
 ### 1.2 RabbitMQ Message Broker (Generiek & Productie)
 - **Virtual Host:** De aanwezigheid van de vhost **`ebms`** is een verplichte randvoorwaarde.
@@ -33,16 +34,16 @@ Dit handboek beschrijft de volledige deployment en configuratie van de container
 #### A. Generieke Productie-omgeving [Productie & OTAP]
 - **Certificaten:** Officiële PKIoverheid Organisatie / Services certificaten (Server- & Client-certificaatketen).
 - **Endpoints:** Echte Digipoort / overheids-endpoints (bijv. `https://ebms.digipoort.nl/services/ebms`).
-- **mTLS:** Passthrough of Gateway SSL-termination met validatie tegen de PKIoverheid Staat der Nederlanden CA-keten.
+- **mTLS Exposition:** mTLS Passthrough of Gateway SSL-termination met validatie tegen de PKIoverheid Staat der Nederlanden CA-keten. *Op productie wordt de Ingress/Gateway ontsloten via een LoadBalancer of Ingress Controller op poort 443/8443 (geen port-forwarding).* 
 - **Inbound Paden:** Routering van inkomende ebMS SOAP-berichten direct naar `ebms-ebms-orchestrator:8080/services/ebms`.
 - **OIN Validatie:** De Ingress/API Gateway valideert de client-certificaat OIN uit de mTLS-handshake en geeft deze via de HTTP-header `X-Forwarded-Client-OIN` door aan de Orchestrator.
-- **Productie Poort-Exposition:** Op productie wordt géén `kubectl port-forward` gebruikt. Ingress Controllers (zoals Kong, NGINX of HAProxy) of OpenShift Routers worden direct op cluster- / infrastructureel niveau blootgesteld via een `LoadBalancer` of `NodePort` Service op de standaard TLS-poorten (8443/443/8843).
 
 #### B. Logius Compliance / Testsuite-omgeving [Specifiek voor Testsuite / Simulatie]
 - **Host Aliases:** Interne DNS/HostAliases in de K8s Pod spec voor `proxy-dart` en `proxy-cvwus` (koppelend aan het netwerk-IP van de testomgeving).
 - **Testcertificaten:** Geautomatiseerde inleesstap vanuit de Logius testgenerator (`$COMPLIANCE_GEN_DIR/client-certs/dart.pem` + `ca-chain.pem`).
 - **Non-SNI SSL Fallback (Kong Gateway):** De Ingress Controller luistert op poort `8843` (SSL 8443) met `KONG_SSL_CERT` vastgezet op `ebms-tls-secret` om legacy test-clients te ondersteunen die geen Server Name Indication (SNI) meesturen.
 - **DigipoortStub Rewrite:** Ingress pad `/digipoortStub` wordt via een `KongPlugin` (request-transformer) herschreven naar `/services/ebms` en verrijkt met de test-OIN header (`X-Forwarded-Client-OIN: 00000004003214345001`).
+- **Dev Port-Forward:** Alleen voor lokale Vagrant/K3s ontwikkelomgevingen wordt tijdelijk `kubectl port-forward ... 8843:8443` gestart.
 
 ---
 
@@ -55,6 +56,24 @@ Dit handboek beschrijft de volledige deployment en configuratie van de container
 
 #### B. Logius Compliance / Testsuite-omgeving [Specifiek voor Testsuite]
 - Geautomatiseerde OpenSSL/keytool conversie in de build-pijp die de Logius test-sleutel (`dart.pem` / `dart.key`) ontsleutelt en omzet naar `keystore.p12` met expliciete aliassen **`signing-key`** en **`orchestrator-key`**, zonder interactieve passkey prompts.
+
+---
+
+### 1.5 Matrix voor Certificaatbeheer & Keystore Secrets
+
+Onderstaande matrix geeft per omgeving een integraal overzicht van de benodigde Kubernetes Secrets, bestandslocaties, aliassen, wachtwoorden en certificaat-typen:
+
+| Parameter / Kenmerk | Dev / Lokaal (Vagrant/K3s) | Test / OTAP (Interne CA) | Compliance (Logius Testsuite) | Productie (PKIoverheid) |
+| :--- | :--- | :--- | :--- | :--- |
+| **K8s Secret Naam** | `crypto-keystore-secret` | `crypto-keystore-secret` | `crypto-keystore-secret` & `ebms-tls-secret` | `crypto-keystore-secret` |
+| **Keystore Bestand (`/app/keystores/`)** | `keystore.p12` | `keystore.p12` | `keystore.p12` | `keystore.p12` |
+| **Truststore Bestand (`/app/keystores/`)** | `truststore.p12` | `truststore.p12` | `truststore.p12` | `truststore.p12` |
+| **Keystore Wachtwoord (`KEYSTORE_PASSWORD`)** | `change-me-keystore` | Via Vault / Secret | `change-me-keystore` | Via Key Vault / Secret |
+| **Truststore Wachtwoord (`TRUSTSTORE_PASSWORD`)** | `change-me-truststore` | Via Vault / Secret | `change-me-truststore` | Via Key Vault / Secret |
+| **Private Key Alias (XML-DSig)** | `signing-key` | `signing-key` | `signing-key` (Logius DART key) | **`signing-key`** (PKIoverheid Services Certificaten) |
+| **mTLS Client Key Alias** | `orchestrator-key` | `orchestrator-key` | `orchestrator-key` (Logius DART key) | **`orchestrator-key`** (PKIoverheid Client Certificaat) |
+| **Certificaat Type** | Self-signed / Test CA | Interne Organisatie CA | Logius Compliance Test CA (`dart.pem`) | **PKIoverheid Organisatie / Services** (Staat der Nederlanden Root/Intermediate) |
+| **Inbound Ingress TLS Secret** | `ebms-tls-secret` | `ebms-tls-secret` | `ebms-tls-secret` (Non-SNI port 8843) | Productie Edge Route / Gateway Certificaat |
 
 ---
 
@@ -151,9 +170,9 @@ oc apply -f ebms-routes-openshift.yaml
 
 ---
 
-## Sectie 3: Kubernetes Deployment & `deploy.sh` Script
+## Sectie 3: Kubernetes Deployment & Parametriseerbaar `deploy.sh` Script
 
-### 3.1 Helm Chart Overrides & Volume Mounts (Generiek)
+### 3.1 Helm Chart Overrides & Probes (Generiek)
 Standaard maakt de Helm-chart een lege Persistent Volume Claim (PVC) aan op `/app/keystores`. In zowel productie als compliance-omgevingen wordt dit overruled door een directe Secret Mount:
 
 ```yaml
@@ -172,7 +191,7 @@ containers:
 
 ---
 
-### 3.2 Het Geautomatisede Deployment Script (`deploy.sh`)
+### 3.2 Het Geparametriseerde Deployment Script (`deploy.sh`)
 
 > 💡 **Opmerkingen over parametrisering & productie-instellingen:**
 > 1. **Parametrisering:** Alle paden, container registries en database-hosts worden aangestuurd via omgevingsvariabelen met veilige defaults. Zowel in lokale Vagrant-omgevingen als in CI/CD pipelines (GitLab/GitHub Actions) kunnen deze eenvoudig worden overschreven.
@@ -286,7 +305,6 @@ fi
 rm -rf ./keystores
 
 echo "==> 5. Helm Template genereren..."
-# N.B. initialDelaySeconds=$INITIAL_DELAY_DEV is ingesteld voor de bouwstraat/lokale VM.
 helm template ebms ./ebms-adapter/helm \
   --set postgresql.enabled=false \
   --set rabbitmq.enabled=false \
@@ -318,8 +336,6 @@ echo "==> 8. Kong herstarten (Lokale Port-Forward uitsluitend voor Dev/Vagrant).
 kubectl rollout restart deployment/kong-kong -n kong
 kubectl rollout status deployment/kong-kong -n kong --timeout=300s || true
 
-# N.B. Port-forward is uitsluitend voor de lokale Vagrant/k3s ontwikkelomgeving.
-# Op Productie vervalt deze stap (zie Sectie 1.3A voor LoadBalancer/NodePort/Route exposition).
 if [ "${ENV_TYPE:-dev}" = "dev" ]; then
   pkill -f "port-forward.*8843" 2>/dev/null || true
   nohup kubectl port-forward -n kong service/kong-kong-proxy 8843:8443 --address 0.0.0.0 > /dev/null 2>&1 &
@@ -374,7 +390,7 @@ Draai deze specifieke verificatiestappen bij het testen tegen de Logius Complian
    ```
 3. **Logius Echo Test & Asynchrone Callback:**
    Draai `./logiusecho.sh` en verifieer in de logs dat:
-   - Outbound XML-DSig untertekening slaagt via `crypto-service` met SHA-1.
+   - Outbound XML-DSig ondertekening slaagt via `crypto-service` met SHA-1.
    - Het bericht naar Logius wordt verstuurd op `https://proxy-cvwus:8443`.
    - Logius asynchroon antwoordt op `https://proxy-dart:8843/digipoortStub`.
    - De Orchestrator het inkomende bericht ontvangt op `OrchestratorService` met de bijbehorende `RefToMessageId`.
