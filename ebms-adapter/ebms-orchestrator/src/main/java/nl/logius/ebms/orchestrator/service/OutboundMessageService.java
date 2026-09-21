@@ -117,7 +117,8 @@ public class OutboundMessageService {
             // ── 3. Signing (indien vereist door profiel) ───────────────────
             if (requireSignature) {
                 String signingAlias = defaultSigningKeyAlias;
-                log.debug("[OUTBOUND] Signing: messageId={} alias={}", messageId, signingAlias);
+                log.info("[OUTBOUND] Signing: messageId={} alias={} hashFunction={} signatureAlgorithm={}",
+                    messageId, signingAlias, route.getHashFunction(), route.getSignatureAlgorithm());
                 rawSoapXml = cryptoServiceClient.sign(rawSoapXml, signingAlias, messageId,
                     route.getHashFunction(), route.getSignatureAlgorithm());
             }

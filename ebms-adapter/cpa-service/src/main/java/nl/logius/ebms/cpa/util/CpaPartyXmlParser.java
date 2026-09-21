@@ -280,6 +280,8 @@ private static String getLenientAttribute(Element element, String attributeName)
                             cpaId, sender.id(), channelId);
                         continue;
                     }
+                    SecurityConfig security = securityByChannel.getOrDefault(channelId, SecurityConfig.NONE)
+                        .withProfileFallback(sender.serviceType());
                     routes.add(CpaOutboundRouteEntity.builder()
                         .cpaId(cpaId)
                         .fromPartyId(sender.partyId())
@@ -290,12 +292,9 @@ private static String getLenientAttribute(Element element, String attributeName)
                         .actionBindingId(sender.id())
                         .fromRole(sender.role())
                         .toRole(receiver.role())
-                        .signatureRequired(securityByChannel.getOrDefault(
-                            channelId, SecurityConfig.NONE).signatureRequired())
-                        .hashFunction(securityByChannel.getOrDefault(
-                            channelId, SecurityConfig.NONE).hashFunction())
-                        .signatureAlgorithm(securityByChannel.getOrDefault(
-                            channelId, SecurityConfig.NONE).signatureAlgorithm())
+                        .signatureRequired(security.signatureRequired())
+                        .hashFunction(security.hashFunction())
+                        .signatureAlgorithm(security.signatureAlgorithm())
                         .channelPartyId(channelPartyId)
                         .channelId(channelId)
                         .build());
@@ -438,6 +437,15 @@ private static String getLenientAttribute(Element element, String attributeName)
     private record SecurityConfig(boolean signatureRequired, String hashFunction,
                                   String signatureAlgorithm) {
         private static final SecurityConfig NONE = new SecurityConfig(false, null, null);
+
+        SecurityConfig withProfileFallback(String serviceType) {
+            if (signatureRequired || serviceType == null || !serviceType.contains(":signed:")) {
+                return this;
+            }
+            return new SecurityConfig(true,
+                "http://www.w3.org/2000/09/xmldsig#sha1",
+                "http://www.w3.org/2000/09/xmldsig#rsa-sha1");
+        }
     }
 
     // ── Certificaat-extractie ────────────────────────────────────────────

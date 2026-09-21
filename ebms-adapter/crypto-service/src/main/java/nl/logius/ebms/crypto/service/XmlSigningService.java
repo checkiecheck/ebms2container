@@ -144,8 +144,8 @@ public class XmlSigningService {
             String signedXml = serializeDocument(doc);
             persistAudit("XML_SIGN", keyAlias, messageId, "SUCCESS", null, null,
                 (int)(System.currentTimeMillis() - startMs));
-            log.info("[XML-SIGN] Ondertekend: keyAlias={} messageId={} algo={}",
-                keyAlias, messageId, sigAlgo);
+            log.info("[XML-SIGN] Ondertekend: keyAlias={} messageId={} signatureAlgorithm={} digestAlgorithm={}",
+                keyAlias, messageId, sigAlgo, digestAlgo);
             return signedXml;
 
         } catch (XmlSecurityException e) {
