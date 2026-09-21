@@ -157,8 +157,8 @@ public class OrchestratorService {
             // 8. Terminale status bijwerken: businessberichten zijn afgeleverd, ebMS-
             // systeemsignalen zijn door de orchestrator zelf verwerkt.
             if (isMessageError(header)) {
-                trackingService.markProcessed(messageId);
                 markReferencedOutboundFailed(header, request);
+                trackingService.markProcessed(messageId);
             } else {
                 trackingService.markDelivered(messageId);
             }
