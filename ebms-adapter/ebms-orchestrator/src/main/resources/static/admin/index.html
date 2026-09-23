@@ -33,12 +33,27 @@
 
   <!-- ══════════════════════════ TAB 1: BERICHTEN ══════════════════════════ -->
   <main id="tabBerichten" class="p-6 max-w-7xl mx-auto">
-    <div class="flex items-center justify-end mb-3 gap-3 text-xs">
-      <span class="text-slate-500">auto-refresh 10s</span>
+    <div class="flex flex-col gap-3 mb-3 lg:flex-row lg:items-center lg:justify-between">
+      <div class="flex flex-wrap items-center gap-2" data-testid="message-filters">
+        <button type="button" data-message-filter="ALL"
+          class="message-filter px-3 py-1.5 rounded-md border text-xs transition-colors">Alle (0)</button>
+        <button type="button" data-message-filter="INBOUND"
+          class="message-filter px-3 py-1.5 rounded-md border text-xs transition-colors">INBOUND (0)</button>
+        <button type="button" data-message-filter="OUTBOUND"
+          class="message-filter px-3 py-1.5 rounded-md border text-xs transition-colors">OUTBOUND (0)</button>
+        <button type="button" data-message-filter="FAILED"
+          class="message-filter px-3 py-1.5 rounded-md border text-xs transition-colors">FAILED (0)</button>
+      </div>
+      <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <input id="messageSearchInput" data-testid="message-search-input" type="search"
+          placeholder="Zoek Message ID, Conversation ID of Party ID"
+          class="w-full sm:w-80 bg-slate-950 border border-slate-700 rounded-md px-3 py-1.5 text-sm placeholder-slate-600 focus:outline-none focus:border-emerald-500" />
+        <span id="autoRefreshStatus" class="text-slate-500 text-xs whitespace-nowrap">auto-refresh 10s</span>
       <button id="refreshBtn" data-testid="refresh-button"
         class="px-3 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-medium transition-colors">
         Refresh
       </button>
+      </div>
     </div>
 
     <div class="rounded-lg border border-slate-800 overflow-hidden">
@@ -48,10 +63,16 @@
             <th class="text-left px-4 py-3">Message ID</th>
             <th class="text-left px-4 py-3">Conversation</th>
             <th class="text-left px-4 py-3">From → To</th>
-            <th class="text-left px-4 py-3">Dir</th>
-            <th class="text-left px-4 py-3">Status</th>
+            <th class="text-left px-4 py-3" data-sort-header="direction">
+              <button type="button" class="flex items-center gap-1 hover:text-slate-200" data-sort-key="direction">Dir <span data-sort-indicator="direction">↕</span></button>
+            </th>
+            <th class="text-left px-4 py-3" data-sort-header="status">
+              <button type="button" class="flex items-center gap-1 hover:text-slate-200" data-sort-key="status">Status <span data-sort-indicator="status">↕</span></button>
+            </th>
             <th class="text-left px-4 py-3">Retries</th>
-            <th class="text-left px-4 py-3">Timestamp</th>
+            <th class="text-left px-4 py-3" data-sort-header="timestamp">
+              <button type="button" class="flex items-center gap-1 hover:text-slate-200" data-sort-key="timestamp">Timestamp <span data-sort-indicator="timestamp">↓</span></button>
+            </th>
           </tr>
         </thead>
         <tbody id="messageRows" data-testid="message-rows" class="divide-y divide-slate-800">
@@ -60,18 +81,8 @@
       </table>
     </div>
 
-    <div class="flex items-center justify-between mt-4 text-sm text-slate-400">
+    <div class="mt-4 text-sm text-slate-400">
       <span id="pageInfo" data-testid="page-info">-</span>
-      <div class="flex gap-2">
-        <button id="prevBtn" data-testid="prev-page-button"
-          class="px-3 py-1.5 rounded-md border border-slate-700 hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors">
-          ← Vorige
-        </button>
-        <button id="nextBtn" data-testid="next-page-button"
-          class="px-3 py-1.5 rounded-md border border-slate-700 hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors">
-          Volgende →
-        </button>
-      </div>
     </div>
   </main>
 
@@ -234,9 +245,14 @@
 
     // ═══════════════════════════ Tab 1: Berichten ════════════════════════════
     const API_URL = '/api/admin/messages';
-    const PAGE_SIZE = 50;
-    let currentPage = 0;
+    const PAGE_SIZE = 100;
     let currentData = [];
+    let visibleData = [];
+    let totalMessageCount = 0;
+    let activeMessageFilter = 'ALL';
+    let messageSortKey = 'timestamp';
+    let messageSortDirection = 'desc';
+    let messageSearchFocused = false;
 
     const statusBadge = (status) => {
       const map = {
@@ -268,19 +284,52 @@
         .replace(/'/g, '&#039;');
     }
 
-    async function loadMessages(page = 0) {
+    async function loadMessages() {
       try {
-        const res = await fetch(`${API_URL}?page=${page}&size=${PAGE_SIZE}`);
+        const res = await fetch(`${API_URL}?page=0&size=${PAGE_SIZE}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         currentData = data.content || [];
-        currentPage = data.number ?? page;
-        renderRows(currentData);
-        renderPageInfo(data);
+        totalMessageCount = data.totalElements ?? currentData.length;
+        applyMessageView();
       } catch (err) {
         document.getElementById('messageRows').innerHTML =
           `<tr><td colspan="7" class="px-4 py-8 text-center text-red-400" data-testid="load-error">Kon berichten niet laden: ${err.message}</td></tr>`;
       }
+    }
+
+    function applyMessageView() {
+      const searchTerm = document.getElementById('messageSearchInput').value.trim().toLowerCase();
+      visibleData = currentData.filter((message) => {
+        const matchesFilter = activeMessageFilter === 'ALL'
+          || (activeMessageFilter === 'FAILED'
+            ? message.status === 'FAILED'
+            : message.direction === activeMessageFilter);
+        const matchesSearch = !searchTerm || [
+          message.messageId,
+          message.conversationId,
+          message.fromPartyId,
+          message.toPartyId,
+        ].some((value) => String(value || '').toLowerCase().includes(searchTerm));
+        return matchesFilter && matchesSearch;
+      });
+
+      visibleData.sort((left, right) => {
+        const leftValue = messageSortKey === 'timestamp'
+          ? new Date(left.timestamp || 0).getTime()
+          : String(left[messageSortKey] || '');
+        const rightValue = messageSortKey === 'timestamp'
+          ? new Date(right.timestamp || 0).getTime()
+          : String(right[messageSortKey] || '');
+        const comparison = typeof leftValue === 'number'
+          ? leftValue - rightValue
+          : leftValue.localeCompare(rightValue, 'nl');
+        return messageSortDirection === 'asc' ? comparison : -comparison;
+      });
+
+      renderRows(visibleData);
+      renderMessageControls();
+      renderPageInfo();
     }
 
     function renderRows(rows) {
@@ -291,10 +340,10 @@
       }
       tbody.innerHTML = rows.map((m, idx) => `
         <tr class="hover:bg-slate-900/60 cursor-pointer transition-colors" data-testid="message-row-${idx}" onclick="openDetails(${idx})">
-          <td class="px-4 py-3 text-slate-300 truncate max-w-[220px]" title="${m.messageId}">${m.messageId}</td>
-          <td class="px-4 py-3 text-slate-400 truncate max-w-[160px]" title="${m.conversationId}">${m.conversationId}</td>
-          <td class="px-4 py-3 text-slate-400">${m.fromPartyId} → ${m.toPartyId}</td>
-          <td class="px-4 py-3 text-slate-500">${m.direction}</td>
+          <td class="px-4 py-3 text-slate-300 truncate max-w-[220px]" title="${escapeHtml(m.messageId)}">${escapeHtml(m.messageId)}</td>
+          <td class="px-4 py-3 text-slate-400 truncate max-w-[160px]" title="${escapeHtml(m.conversationId)}">${escapeHtml(m.conversationId)}</td>
+          <td class="px-4 py-3 text-slate-400">${escapeHtml(m.fromPartyId)} → ${escapeHtml(m.toPartyId)}</td>
+          <td class="px-4 py-3 text-slate-500">${escapeHtml(m.direction)}</td>
           <td class="px-4 py-3">${statusBadge(m.status)}</td>
           <td class="px-4 py-3 text-slate-500">${m.retryCount}</td>
           <td class="px-4 py-3 text-slate-500 whitespace-nowrap">${fmtTime(m.timestamp)}</td>
@@ -302,17 +351,43 @@
       `).join('');
     }
 
-    function renderPageInfo(data) {
-      const total = data.totalElements ?? currentData.length;
-      const totalPages = data.totalPages ?? 1;
+    function renderMessageControls() {
+      const counts = {
+        ALL: currentData.length,
+        INBOUND: currentData.filter((message) => message.direction === 'INBOUND').length,
+        OUTBOUND: currentData.filter((message) => message.direction === 'OUTBOUND').length,
+        FAILED: currentData.filter((message) => message.status === 'FAILED').length,
+      };
+      document.querySelectorAll('[data-message-filter]').forEach((button) => {
+        const filter = button.dataset.messageFilter;
+        button.textContent = `${filter === 'ALL' ? 'Alle' : filter} (${counts[filter]})`;
+        button.className = `message-filter px-3 py-1.5 rounded-md border text-xs transition-colors ${
+          filter === activeMessageFilter
+            ? 'border-emerald-500 bg-emerald-500/15 text-emerald-300'
+            : 'border-slate-700 text-slate-400 hover:bg-slate-800'}`;
+      });
+      document.querySelectorAll('[data-sort-key]').forEach((button) => {
+        const key = button.dataset.sortKey;
+        const header = button.closest('th');
+        header.setAttribute('aria-sort', key !== messageSortKey
+          ? 'none'
+          : messageSortDirection === 'asc' ? 'ascending' : 'descending');
+        button.querySelector('[data-sort-indicator]').textContent = key !== messageSortKey
+          ? '↕'
+          : messageSortDirection === 'asc' ? '↑' : '↓';
+      });
+    }
+
+    function renderPageInfo() {
+      const loadedSuffix = totalMessageCount > currentData.length
+        ? ` · nieuwste ${currentData.length} van ${totalMessageCount} geladen`
+        : ` · ${totalMessageCount} totaal`;
       document.getElementById('pageInfo').textContent =
-        `Pagina ${currentPage + 1} van ${Math.max(totalPages, 1)} · ${total} berichten totaal`;
-      document.getElementById('prevBtn').disabled = currentPage <= 0;
-      document.getElementById('nextBtn').disabled = data.last === true || currentPage + 1 >= totalPages;
+        `${visibleData.length} berichten zichtbaar${loadedSuffix}`;
     }
 
     function openDetails(idx) {
-      const m = currentData[idx];
+      const m = visibleData[idx];
       const rows = [
         ['Message ID', m.messageId],
         ['Ref To Message ID', m.refToMessageId || '-'],
@@ -352,13 +427,40 @@
       if (e.target.id === 'detailsModal') e.target.classList.add('hidden');
     });
 
-    document.getElementById('refreshBtn').onclick = () => loadMessages(currentPage);
-    document.getElementById('prevBtn').onclick = () => loadMessages(Math.max(0, currentPage - 1));
-    document.getElementById('nextBtn').onclick = () => loadMessages(currentPage + 1);
+    document.querySelectorAll('[data-message-filter]').forEach((button) => {
+      button.onclick = () => {
+        activeMessageFilter = button.dataset.messageFilter;
+        applyMessageView();
+      };
+    });
+    document.querySelectorAll('[data-sort-key]').forEach((button) => {
+      button.onclick = () => {
+        const key = button.dataset.sortKey;
+        if (messageSortKey === key) {
+          messageSortDirection = messageSortDirection === 'asc' ? 'desc' : 'asc';
+        } else {
+          messageSortKey = key;
+          messageSortDirection = 'asc';
+        }
+        applyMessageView();
+      };
+    });
 
-    loadMessages(0);
+    const messageSearchInput = document.getElementById('messageSearchInput');
+    messageSearchInput.oninput = applyMessageView;
+    messageSearchInput.onfocus = () => {
+      messageSearchFocused = true;
+      document.getElementById('autoRefreshStatus').textContent = 'auto-refresh gepauzeerd';
+    };
+    messageSearchInput.onblur = () => {
+      messageSearchFocused = false;
+      document.getElementById('autoRefreshStatus').textContent = 'auto-refresh 10s';
+    };
+    document.getElementById('refreshBtn').onclick = loadMessages;
+
+    loadMessages();
     setInterval(() => {
-      if (!tabBerichten.classList.contains('hidden')) loadMessages(currentPage);
+      if (!tabBerichten.classList.contains('hidden') && !messageSearchFocused) loadMessages();
     }, 10000);
 
     // ═══════════════════════════ Tab 2: CPA Beheer ═══════════════════════════
