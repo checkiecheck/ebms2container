@@ -165,6 +165,11 @@ public class OutboundSoapClient {
             int statusCode = response.statusCode();
             String responseBody = response.body();
 
+            if (statusCode < 200 || statusCode >= 300) {
+                throw new EbmsException("HTTP_ERROR",
+                    statusCode + " " + httpReason(statusCode) + " van partner endpoint " + endpointUrl);
+            }
+
             if (statusCode == 204) {
                 log.info("[OUTBOUND] HTTP 204 No Content ontvangen van endpoint={}; geen SOAP-response te parsen", endpointUrl);
                 return null;
@@ -183,6 +188,23 @@ public class OutboundSoapClient {
             throw new EbmsException("CONNECTION_ERROR",
                 "SOAP-response van " + endpointUrl + " kon niet worden gelezen: " + describeFailure(e));
         }
+    }
+
+    private String httpReason(int statusCode) {
+        return switch (statusCode) {
+            case 400 -> "Bad Request";
+            case 401 -> "Unauthorized";
+            case 403 -> "Forbidden";
+            case 404 -> "Not Found";
+            case 405 -> "Method Not Allowed";
+            case 408 -> "Request Timeout";
+            case 429 -> "Too Many Requests";
+            case 500 -> "Internal Server Error";
+            case 502 -> "Bad Gateway";
+            case 503 -> "Service Unavailable";
+            case 504 -> "Gateway Timeout";
+            default -> "HTTP Error";
+        };
     }
 
     private Throwable rootCause(Throwable failure) {

@@ -144,4 +144,34 @@ class OutboundSoapClientTest {
             .satisfies(ex -> assertThat(((nl.logius.ebms.common.exception.EbmsException) ex).getErrorCode())
                 .isEqualTo("CONNECTION_ERROR"));
     }
+
+    @Test
+    void send_notFoundResponse_preservesHttpStatus() throws Exception {
+        server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        server.createContext("/ebms", exchange -> {
+            byte[] response = "Not Found".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(404, response.length);
+            try (OutputStream output = exchange.getResponseBody()) {
+                output.write(response);
+            }
+        });
+        server.start();
+
+        SoapHelper soapHelper = new SoapHelper();
+        OutboundSoapClient client = new OutboundSoapClient(
+            new EbmsOutboundSSLProperties(), mock(CpaValidationService.class), soapHelper);
+
+        assertThatThrownBy(() -> client.send(
+                "http://localhost:" + server.getAddress().getPort() + "/ebms",
+                "<soap:Envelope xmlns:soap=\"http://schemas.xmlsoap.org/soap/envelope/\"><soap:Body/></soap:Envelope>",
+                "cpa-1",
+                "to"))
+            .isInstanceOf(nl.logius.ebms.common.exception.EbmsException.class)
+            .satisfies(ex -> {
+                nl.logius.ebms.common.exception.EbmsException ebmsException =
+                    (nl.logius.ebms.common.exception.EbmsException) ex;
+                assertThat(ebmsException.getErrorCode()).isEqualTo("HTTP_ERROR");
+                assertThat(ebmsException.getMessage()).contains("404 Not Found");
+            });
+    }
 }

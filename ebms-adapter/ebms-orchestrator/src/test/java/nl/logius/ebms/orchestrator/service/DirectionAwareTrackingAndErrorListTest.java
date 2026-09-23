@@ -308,7 +308,8 @@ class DirectionAwareTrackingAndErrorListTest {
         void cryptoSigningFailure_marksFailed_noRequeue() throws Exception {
             stubHappyChannel("osb-rm-s"); // profile requiring signing (contains 's')
             Mockito.doThrow(new XmlSecurityException("onbekende key alias"))
-                .when(cryptoServiceClient).sign(anyString(), anyString(), anyString());
+                .when(cryptoServiceClient).sign(
+                    anyString(), anyString(), anyString(), any(), any());
 
             service.handleOutboundMessage(outboundMessage, amqpChannel, 2L);
 
