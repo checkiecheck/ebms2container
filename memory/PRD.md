@@ -862,6 +862,27 @@ INBOUND bericht dat vastzat op PROCESSING liep elke ~10 minuten in een eindeloze
 - [ ] OIN-header injectie (X-Forwarded-Client-OIN) vanuit client-certificaat
 - [ ] Kubernetes NetworkPolicy-configuratie
 
+### P1 – Live connectiviteitscheck hardening (GEPARKEERD IN BACKLOG)
+- **Architectuurkeuze (september 2026):** authenticatie en autorisatie voor `/admin`,
+  `/api/admin` en `/api/cpa` op ingressniveau implementeren. Geen applicatiespecifieke
+  authenticatiemethode afdwingen in de orchestrator.
+- **Kanaalkeuze:** de huidige lookup op CPA + partner gebruikt het eerste afleveringskanaal. Dit is
+  acceptabel zolang kanalen voor dezelfde partner dezelfde host gebruiken. Later waarschuwing of
+  verplichte `channelId` toevoegen wanneer meerdere unieke hosts worden gedetecteerd.
+- [ ] `fromPartyId` server-side tegen de CPA valideren of vanuit de CPA afleiden; niet uitsluitend
+  vertrouwen op de requestbody van de admin-UI.
+- [ ] Alleen Ping toestaan voor een actieve en niet-verlopen CPA, tenzij beheer expliciet ook
+  geschorste CPA's moet kunnen testen.
+- [ ] Pong volledig correleren: naast Service/Action/RefToMessageId ook CPA ID, Conversation ID en
+  omgedraaide From/To-partijen controleren.
+- [ ] Certificaatselectie voor mTLS onderscheiden van XML-signing/encryptiecertificaten en het
+  lokale clientcertificaat/alias expliciet bepalen.
+- [ ] SSRF-beperking voor CPA-endpoints toevoegen (minimaal loopback, link-local en cloud metadata
+  blokkeren), onafhankelijk van ingress-authenticatie.
+- [ ] Dedicated korte Ping-timeouts, audit/metrics en behoud van de werkelijke partner-HTTP-status
+  toevoegen. Documenteren dat Ping alleen mTLS + ebMS Ping/Pong bewijst, niet signing, encryptie,
+  Reliable Messaging of zakelijke servicebindingen.
+
 ### P2 – Fase 6: Productie-klaar
 - [ ] Kubernetes manifesten (Deployment, Service, Ingress, NetworkPolicy)
 - [ ] Prometheus/Grafana monitoring dashboards

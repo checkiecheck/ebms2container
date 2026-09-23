@@ -561,7 +561,7 @@
       `;
     }
 
-    function renderNetworkMap(parsed) {
+    function renderNetworkMap(parsed, connectivityEnabled = false) {
       const container = document.getElementById('cpaNetworkMap');
       if (!parsed.parties.length) {
         container.innerHTML = '<p class="text-slate-600">Geen partijen gevonden in deze CPA.</p>';
@@ -575,19 +575,93 @@
           ${targets.map((receiver, idx) => `
             <div class="flex items-center gap-4 flex-wrap">
               ${partyNode(sender, 'sender-' + idx)}
-              <div class="flex flex-col items-center px-2">
+              <div class="flex w-full flex-col items-center gap-2 px-2 sm:w-auto sm:min-w-[220px]"
+                data-testid="connectivity-control-${idx}">
                 <span class="text-xs text-slate-500">ebMS 2.0</span>
-                <div class="flex items-center text-emerald-500">
-                  <span class="w-8 h-px bg-emerald-500/60"></span>
+                <div id="connectivityArrow-${idx}" class="flex items-center text-emerald-500 transition-colors">
+                  <span class="connectivity-line w-8 h-px bg-emerald-500/60 transition-colors"></span>
                   <span class="mx-1">➔</span>
-                  <span class="w-8 h-px bg-emerald-500/60"></span>
+                  <span class="connectivity-line w-8 h-px bg-emerald-500/60 transition-colors"></span>
                 </div>
+                <button type="button" data-testid="connectivity-test-${idx}"
+                  data-control-index="${idx}"
+                  data-cpa-id="${encodeURIComponent(parsed.cpaId)}"
+                  data-from-party-id="${encodeURIComponent(sender.oin)}"
+                  data-to-party-id="${encodeURIComponent(receiver.oin)}"
+                  onclick="testConnectivity(this)"
+                  ${connectivityEnabled ? '' : 'disabled title="Sla de CPA eerst op"'}
+                  class="min-w-[150px] px-3 py-1.5 rounded-md border border-slate-700 text-xs text-slate-300 hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                  Ping Partner
+                </button>
+                <p id="connectivityResult-${idx}" data-testid="connectivity-result-${idx}"
+                  class="hidden max-w-[260px] text-center text-xs break-words"></p>
               </div>
               ${partyNode(receiver, 'receiver-' + idx)}
             </div>
           `).join('')}
         </div>
       `;
+    }
+
+    function setConnectivityState(index, state, message = '') {
+      const arrow = document.getElementById(`connectivityArrow-${index}`);
+      const result = document.getElementById(`connectivityResult-${index}`);
+      if (!arrow || !result) return;
+
+      const colors = {
+        testing: ['text-amber-400', 'bg-amber-400/60'],
+        success: ['text-emerald-500', 'bg-emerald-500/60'],
+        error: ['text-red-500', 'bg-red-500/60'],
+      };
+      const [textColor, lineColor] = colors[state] || colors.success;
+      arrow.className = `flex items-center ${textColor} transition-colors`;
+      arrow.querySelectorAll('.connectivity-line').forEach((line) => {
+        line.className = `connectivity-line w-8 h-px ${lineColor} transition-colors`;
+      });
+
+      result.className = `max-w-[260px] text-center text-xs break-words ${
+        state === 'error' ? 'text-red-400' : state === 'success' ? 'text-emerald-400' : 'text-amber-400'}`;
+      result.textContent = message;
+      result.classList.toggle('hidden', !message);
+    }
+
+    async function testConnectivity(button) {
+      const index = button.dataset.controlIndex;
+      const cpaId = decodeURIComponent(button.dataset.cpaId);
+      const fromPartyId = decodeURIComponent(button.dataset.fromPartyId);
+      const toPartyId = decodeURIComponent(button.dataset.toPartyId);
+
+      button.disabled = true;
+      button.innerHTML = '<span class="inline-block h-3 w-3 mr-1 border-2 border-slate-500 border-t-emerald-400 rounded-full animate-spin align-[-2px]"></span>Verbinding testen...';
+      setConnectivityState(index, 'testing', 'mTLS-handshake en ebMS Ping uitvoeren...');
+
+      try {
+        const response = await fetch(
+          `/api/admin/cpa/${encodeURIComponent(cpaId)}/partners/${encodeURIComponent(toPartyId)}/ping`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fromPartyId }),
+          });
+        let result = null;
+        try {
+          result = await response.json();
+        } catch (_) {
+          // Gebruik de HTTP-status als de server geen JSON-foutdetail kon teruggeven.
+        }
+
+        if (response.ok && result?.success) {
+          setConnectivityState(index, 'success',
+            `${result.httpStatus || response.status} OK - ${result.message} (${result.latencyMs} ms)`);
+        } else {
+          const detail = result?.message || `${response.status} ${response.statusText}`;
+          setConnectivityState(index, 'error', detail);
+        }
+      } catch (err) {
+        setConnectivityState(index, 'error', err.message || 'Connectiviteitstest mislukt');
+      } finally {
+        button.disabled = false;
+        button.textContent = 'Ping Partner';
+      }
     }
 
     // ── Afleverkanalen-overzicht ────────────────────────────────────────────────
@@ -851,6 +925,7 @@
         }
         const saved = await res.json();
         renderStatusToggle(saved);
+        renderNetworkMap(lastParsedCpa, true);
         fetchAndRenderChannels(saved.cpaId);
         setUploadStatus(
           `CPA succesvol ${exists ? 'overschreven' : 'opgeslagen'} (cpaId=${saved.cpaId})`, 'success');
@@ -871,7 +946,7 @@
         lastParsedCpa = parsed;
         lastRawXml = dto.cpaXml;
         renderCpaMeta(parsed);
-        renderNetworkMap(parsed);
+        renderNetworkMap(parsed, true);
         renderStatusToggle(dto);
         fetchAndRenderChannels(dto.cpaId);
         document.getElementById('cpaUploadBtn').disabled = false;
