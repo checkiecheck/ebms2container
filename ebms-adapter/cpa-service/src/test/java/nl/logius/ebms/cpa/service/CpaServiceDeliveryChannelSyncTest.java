@@ -126,6 +126,7 @@ class CpaServiceDeliveryChannelSyncTest {
     @Test
     void update_reconcilesChannels_addsUpdatesInPlaceAndRemoves() {
         CpaDeliveryChannelEntity existingCh1 = channel(PARTY_A, "ch1", "osb-be", "http://old/");
+        existingCh1.setSyncReplyMode("mshSignalsOnly");
         CpaDeliveryChannelEntity existingOld  = channel(PARTY_B, "old", "osb-be", "http://gone/");
 
         CpaEntity entity = CpaEntity.builder()
@@ -138,6 +139,7 @@ class CpaServiceDeliveryChannelSyncTest {
         CpaDeliveryChannelEntity parsedCh1  = channel(PARTY_A, "ch1", "osb-rm-e", "https://new/");
         parsedCh1.setRetryCount(3);
         parsedCh1.setRetryInterval(300);
+        parsedCh1.setSyncReplyMode("none");
         CpaDeliveryChannelEntity parsedNew = channel(PARTY_A, "ch2", "osb-be", "https://c/");
         when(partyXmlParser.parseDeliveryChannels(anyString(), any()))
             .thenReturn(List.of(parsedCh1, parsedNew));
@@ -164,6 +166,7 @@ class CpaServiceDeliveryChannelSyncTest {
         assertThat(ch1Saved.getEndpointUrl()).isEqualTo("https://new/");
         assertThat(ch1Saved.getRetryCount()).isEqualTo(3);
         assertThat(ch1Saved.getRetryInterval()).isEqualTo(300);
+        assertThat(ch1Saved.getSyncReplyMode()).isEqualTo("none");
     }
 
     /**

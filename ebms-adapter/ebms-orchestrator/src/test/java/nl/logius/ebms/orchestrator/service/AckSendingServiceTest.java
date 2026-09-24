@@ -112,6 +112,25 @@ class AckSendingServiceTest {
     }
 
     @Test
+    @DisplayName("sendAsyncAck: osb-rm-s-profiel signeert ACK ook zonder signed AckRequested")
+    void sendAsyncAck_signingProfile_signsBeforeSend() {
+        SOAPMessage ack = mock(SOAPMessage.class);
+        DeliveryChannelDto channel = DeliveryChannelDto.builder()
+            .endpointUrl(ENDPOINT_URL).dkProfile("osb-rm-s").build();
+
+        when(cpaValidationService.getDeliveryChannel(CPA_ID, FROM_PARTY_ID)).thenReturn(channel);
+        when(soapHelper.createAck(any())).thenReturn(ack);
+        when(soapHelper.soapToString(ack)).thenReturn("<unsigned-ack/>");
+        when(cryptoServiceClient.sign("<unsigned-ack/>", "signing-key", MESSAGE_ID))
+            .thenReturn("<signed-ack/>");
+
+        service.dispatchAck(task(false));
+
+        verify(cryptoServiceClient).sign("<unsigned-ack/>", "signing-key", MESSAGE_ID);
+        verify(outboundSoapClient).send(eq(ENDPOINT_URL), eq("<signed-ack/>"), eq(CPA_ID), eq(FROM_PARTY_ID));
+    }
+
+    @Test
     @DisplayName("sendAsyncAck: ontbrekend endpoint -> permanente fout, geen outbound call")
     void sendAsyncAck_missingEndpoint_doesNotSend() {
         when(cpaValidationService.getDeliveryChannel(CPA_ID, FROM_PARTY_ID))

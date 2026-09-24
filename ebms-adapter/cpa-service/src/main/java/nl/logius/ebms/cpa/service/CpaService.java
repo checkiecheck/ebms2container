@@ -476,6 +476,7 @@ public class CpaService {
                 existingChannel.setRetryCount(p.getRetryCount());
                 existingChannel.setRetryInterval(p.getRetryInterval());
                 existingChannel.setPersistDuration(p.getPersistDuration());
+                existingChannel.setSyncReplyMode(p.getSyncReplyMode());
                 toSave.add(existingChannel);
             } else {
                 toSave.add(p);

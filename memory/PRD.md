@@ -883,6 +883,15 @@ INBOUND bericht dat vastzat op PROCESSING liep elke ~10 minuten in een eindeloze
   toevoegen. Documenteren dat Ping alleen mTLS + ebMS Ping/Pong bewijst, niet signing, encryptie,
   Reliable Messaging of zakelijke servicebindingen.
 
+### P1 – Server-side ConversationId-filter voor message-monitor (GEPARKEERD IN BACKLOG)
+- **Aanleiding (september 2026):** de statische adminmonitor zoekt nu client-side in alleen de
+  eerste geladen pagina. Daardoor kunnen gerelateerde functionele berichten buiten de geladen set
+  ontbreken.
+- [ ] Voeg `conversationId` als optionele parameter toe aan `GET /api/admin/messages`, met
+  gepagineerde repository-query op de bestaande index `conversation_id`.
+- [ ] Laat de admin-UI bij een Conversation ID-zoekterm deze API-filter gebruiken; behoud de
+  huidige client-side filtering voor Message ID en Party ID.
+
 ### P2 – Fase 6: Productie-klaar
 - [ ] Kubernetes manifesten (Deployment, Service, Ingress, NetworkPolicy)
 - [ ] Prometheus/Grafana monitoring dashboards
