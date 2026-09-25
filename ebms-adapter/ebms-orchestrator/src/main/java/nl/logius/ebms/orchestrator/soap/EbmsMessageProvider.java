@@ -8,7 +8,9 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import nl.logius.ebms.common.exception.EbmsException;
 import nl.logius.ebms.common.model.ebxml.EbxmlMessageHeader;
+import nl.logius.ebms.orchestrator.service.CpaValidationService;
 import nl.logius.ebms.orchestrator.service.OrchestratorService;
+import nl.logius.ebms.orchestrator.service.PingSendingService;
 import jakarta.xml.ws.handler.*;
 import java.util.List;
 import java.util.Map;
@@ -34,6 +36,8 @@ public class EbmsMessageProvider implements Provider<SOAPMessage> {
 
     private final OrchestratorService orchestratorService;
     private final PingEchoService     pingEchoService;
+    private final PingSendingService  pingSendingService;
+    private final CpaValidationService cpaValidationService;
     private final SoapHelper          soapHelper;
 
     /** Injectie van WebServiceContext voor toegang tot HTTP-headers (OIN). */
@@ -63,6 +67,11 @@ public class EbmsMessageProvider implements Provider<SOAPMessage> {
             // Ping/Echo (ISO 15000-2 systeemservice)
             if (isPingRequest(header)) {
                 log.info("[PING] van OIN={}", clientOin);
+                if (isAsyncPing(header)) {
+                    pingSendingService.sendAsyncPong(header);
+                    setHttpResponseCode(204);
+                    return null;
+                }
                 return pingEchoService.handlePing(header);
             }
 
@@ -144,5 +153,27 @@ public class EbmsMessageProvider implements Provider<SOAPMessage> {
         return header.getService() != null
             && SoapHelper.EBXML_PING_SERVICE.equals(header.getService().getValue())
             && "Ping".equalsIgnoreCase(header.getAction());
+    }
+
+    /**
+     * Alleen een expliciet opgehaalde CPA met syncReplyMode=none schakelt Ping naar async.
+     * Bij elke lookupfout blijft de legacy synchrone Pong actief.
+     */
+    private boolean isAsyncPing(EbxmlMessageHeader header) {
+        try {
+            String fromPartyId = header.getFrom().isEmpty() ? null : header.getFrom().get(0).getValue();
+            var channel = cpaValidationService.getDeliveryChannel(header.getCpaId(), fromPartyId);
+            return channel != null && "none".equalsIgnoreCase(channel.getSyncReplyMode());
+        } catch (Exception e) {
+            log.warn("[PING] CPA-mode niet beschikbaar, synchrone Pong blijft actief: cpaId={} reden={}",
+                header.getCpaId(), e.getMessage());
+            return false;
+        }
+    }
+
+    private void setHttpResponseCode(int statusCode) {
+        if (wsContext != null) {
+            wsContext.getMessageContext().put(MessageContext.HTTP_RESPONSE_CODE, statusCode);
+        }
     }
 }

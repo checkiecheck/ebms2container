@@ -41,6 +41,8 @@ public class RabbitMqConfig {
     public static final String QUEUE_ACK       = "ebms.ack.events";
     /** Asynchrone ebMS2 ACK-taken – durable verzending naar de oorspronkelijke verzender. */
     public static final String QUEUE_ASYNC_ACK  = "ebms.async.ack.messages";
+    /** Asynchrone Ping/Pong-taken – durable verzending naar de oorspronkelijke verzender. */
+    public static final String QUEUE_ASYNC_PONG = "ebms.async.pong.messages";
     /** Dead Letter Queue voor berichten die definitief gefaald zijn. */
     public static final String QUEUE_DLQ       = "ebms.dlq";
 
@@ -50,6 +52,7 @@ public class RabbitMqConfig {
     public static final String ROUTING_AUDIT    = "audit";
     public static final String ROUTING_ACK      = "ack";
     public static final String ROUTING_ASYNC_ACK = "async-ack";
+    public static final String ROUTING_ASYNC_PONG = "async-pong";
 
     // ── Exchange bean ─────────────────────────────────────────────────────────
 
@@ -98,6 +101,14 @@ public class RabbitMqConfig {
     }
 
     @Bean
+    public Queue asyncPongQueue() {
+        return QueueBuilder.durable(QUEUE_ASYNC_PONG)
+            .withArgument("x-dead-letter-exchange", "")
+            .withArgument("x-dead-letter-routing-key", QUEUE_DLQ)
+            .build();
+    }
+
+    @Bean
     public Queue deadLetterQueue() {
         return QueueBuilder.durable(QUEUE_DLQ).build();
     }
@@ -127,6 +138,11 @@ public class RabbitMqConfig {
     @Bean
     public Binding asyncAckBinding(Queue asyncAckQueue, DirectExchange ebmsExchange) {
         return BindingBuilder.bind(asyncAckQueue).to(ebmsExchange).with(ROUTING_ASYNC_ACK);
+    }
+
+    @Bean
+    public Binding asyncPongBinding(Queue asyncPongQueue, DirectExchange ebmsExchange) {
+        return BindingBuilder.bind(asyncPongQueue).to(ebmsExchange).with(ROUTING_ASYNC_PONG);
     }
 
     // ── Listener Container Factory (manual ack) ───────────────────────────────

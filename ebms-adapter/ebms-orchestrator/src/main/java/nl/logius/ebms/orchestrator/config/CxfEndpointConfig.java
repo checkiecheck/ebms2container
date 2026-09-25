@@ -7,6 +7,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import nl.logius.ebms.orchestrator.service.OrchestratorService;
+import nl.logius.ebms.orchestrator.service.CpaValidationService;
+import nl.logius.ebms.orchestrator.service.PingSendingService;
 import nl.logius.ebms.orchestrator.soap.EbmsMessageProvider;
 import nl.logius.ebms.orchestrator.soap.EbxmlMustUnderstandInterceptor;
 import nl.logius.ebms.orchestrator.soap.PingEchoService;
@@ -38,8 +40,11 @@ public class CxfEndpointConfig {
     @Bean
     public EbmsMessageProvider ebmsMessageProvider(OrchestratorService orchestratorService,
                                                     PingEchoService pingEchoService,
+                                                    PingSendingService pingSendingService,
+                                                    CpaValidationService cpaValidationService,
                                                     SoapHelper soapHelper) {
-        return new EbmsMessageProvider(orchestratorService, pingEchoService, soapHelper);
+        return new EbmsMessageProvider(orchestratorService, pingEchoService, pingSendingService,
+            cpaValidationService, soapHelper);
     }
 
     /**
