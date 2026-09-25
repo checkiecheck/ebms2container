@@ -106,6 +106,28 @@ class CpaPartyXmlParserSyncReplyModeTest {
     }
 
     @Test
+    void parseDeliveryChannels_directMessagingCharacteristicsOnChannel_extracted() {
+        String xml = ""
+            + "<tns:Root xmlns:tns='http://www.oasis-open.org/committees/ebxml-cppa/schema/cpp-cpa-2_0.xsd'>"
+            + "  <tns:PartyInfo>"
+            + "    <tns:PartyId>" + PARTY + "</tns:PartyId>"
+            + "    <tns:DeliveryChannel tns:channelId='c' tns:transportId='t'"
+            + "        tns:docExchangeId='missing'>"
+            + "      <tns:MessagingCharacteristics tns:syncReplyMode='none'/>"
+            + "    </tns:DeliveryChannel>"
+            + "    <tns:Transport tns:transportId='t'>"
+            + "      <tns:TransportSender><tns:Endpoint tns:uri='https://e/'/></tns:TransportSender>"
+            + "    </tns:Transport>"
+            + "  </tns:PartyInfo>"
+            + "</tns:Root>";
+
+        List<CpaDeliveryChannelEntity> channels = parser.parseDeliveryChannels(xml, CPA_ID);
+
+        assertThat(channels).hasSize(1);
+        assertThat(channels.get(0).getSyncReplyMode()).isEqualTo("none");
+    }
+
+    @Test
     void parseDeliveryChannels_emptySyncReplyMode_treatedAsNull() {
         String xml = ""
             + "<Root><PartyInfo>"

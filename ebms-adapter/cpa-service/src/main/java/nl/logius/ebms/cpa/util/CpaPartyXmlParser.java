@@ -120,6 +120,25 @@ private static String getLenientAttribute(Element element, String attributeName)
     return null;
 }
 
+private static Element firstDirectChild(Element parent, String localName) {
+    if (parent == null) return null;
+    NodeList children = parent.getChildNodes();
+    for (int i = 0; i < children.getLength(); i++) {
+        Node child = children.item(i);
+        if (child.getNodeType() != Node.ELEMENT_NODE) continue;
+        String childLocalName = child.getLocalName();
+        if (childLocalName == null) {
+            String nodeName = child.getNodeName();
+            childLocalName = nodeName.contains(":")
+                ? nodeName.substring(nodeName.indexOf(':') + 1) : nodeName;
+        }
+        if (localName.equalsIgnoreCase(childLocalName)) {
+            return (Element) child;
+        }
+    }
+    return null;
+}
+
     public List<PartyInfoDto> parseParties(String cpaXml) {
         if (cpaXml == null || cpaXml.isBlank()) {
             return List.of();
@@ -659,12 +678,22 @@ private static String getLenientAttribute(Element element, String attributeName)
             if (persistEl != null) {
                 persistDuration = parseDurationSecondsSafe(persistEl.getTextContent());
             }
-            // SyncReplyModule (Koppelvlakstandaard ebMS2 v3.3+): "none" is de Digikoppeling-
-            // default (async), "mshSignalsOnly" moet bilateraal in de CPA afgesproken zijn.
+        }
+
+        // SyncReplyModule (Koppelvlakstandaard ebMS2 v3.3+): "none" is de Digikoppeling-
+        // default (async), "mshSignalsOnly" moet bilateraal in de CPA afgesproken zijn.
+        // Sommige CPA-documenten plaatsen dit element direct onder DeliveryChannel; gebruik
+        // de gekoppelde DocExchange als standaardfallback.
+        Element messagingCharacteristics = firstDirectChild(channelEl, "MessagingCharacteristics");
+        if (messagingCharacteristics == null && docExchangeEl != null) {
             NodeList mcNodes = docExchangeEl.getElementsByTagNameNS("*", "MessagingCharacteristics");
             if (mcNodes.getLength() > 0) {
-                syncReplyMode = blankToNull(getLenientAttribute((Element) mcNodes.item(0), "syncReplyMode"));
+                messagingCharacteristics = (Element) mcNodes.item(0);
             }
+        }
+        if (messagingCharacteristics != null) {
+            syncReplyMode = blankToNull(
+                getLenientAttribute(messagingCharacteristics, "syncReplyMode"));
         }
 
         return CpaDeliveryChannelEntity.builder()
