@@ -1,6 +1,7 @@
 package nl.logius.ebms.orchestrator.soap;
 
 import jakarta.xml.soap.SOAPMessage;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.xml.ws.WebServiceContext;
 import jakarta.xml.ws.handler.MessageContext;
 import nl.logius.ebms.common.model.cpa.DeliveryChannelDto;
@@ -32,6 +33,7 @@ class EbmsMessageProviderPingTest {
     @Mock CpaValidationService cpaValidationService;
     @Mock WebServiceContext webServiceContext;
     @Mock MessageContext messageContext;
+    @Mock HttpServletResponse httpServletResponse;
 
     private EbmsMessageProvider provider;
     private SoapHelper soapHelper;
@@ -57,11 +59,14 @@ class EbmsMessageProviderPingTest {
             responseContext.put(MessageContext.HTTP_RESPONSE_CODE, 204);
             return null;
         });
+        when(messageContext.get(MessageContext.SERVLET_RESPONSE)).thenReturn(httpServletResponse);
 
         SOAPMessage response = provider.invoke(soapHelper.soapFromString(pingXml()));
 
         assertThat(response).isNull();
         assertThat(responseContext.get(MessageContext.HTTP_RESPONSE_CODE)).isEqualTo(204);
+        verify(httpServletResponse).setStatus(204);
+        verify(httpServletResponse).flushBuffer();
         verify(pingSendingService).sendAsyncPong(any());
     }
 

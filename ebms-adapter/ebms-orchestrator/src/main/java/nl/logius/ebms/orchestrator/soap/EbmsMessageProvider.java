@@ -1,6 +1,7 @@
 package nl.logius.ebms.orchestrator.soap;
 
 import jakarta.annotation.Resource;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.xml.soap.SOAPHeader;
 import jakarta.xml.soap.SOAPMessage;
 import jakarta.xml.ws.*;
@@ -173,7 +174,20 @@ public class EbmsMessageProvider implements Provider<SOAPMessage> {
 
     private void setHttpResponseCode(int statusCode) {
         if (wsContext != null) {
-            wsContext.getMessageContext().put(MessageContext.HTTP_RESPONSE_CODE, statusCode);
+            MessageContext messageContext = wsContext.getMessageContext();
+            messageContext.put(MessageContext.HTTP_RESPONSE_CODE, statusCode);
+
+            Object servletResponse = messageContext.get(MessageContext.SERVLET_RESPONSE);
+            if (servletResponse instanceof HttpServletResponse response) {
+                response.setStatus(statusCode);
+                try {
+                    // CXF vervangt een ongecommitteerde null Provider-response door HTTP 202.
+                    response.flushBuffer();
+                } catch (java.io.IOException e) {
+                    throw new IllegalStateException(
+                        "Kan HTTP " + statusCode + "-response niet committen", e);
+                }
+            }
         }
     }
 }
