@@ -6,6 +6,7 @@ import nl.logius.ebms.cpa.entity.CpaEntity;
 import nl.logius.ebms.cpa.entity.CpaPartyEntity;
 import nl.logius.ebms.cpa.mapper.CpaMapper;
 import nl.logius.ebms.cpa.repository.CpaDeliveryChannelRepository;
+import nl.logius.ebms.cpa.repository.CpaOutboundRouteRepository;
 import nl.logius.ebms.cpa.repository.CpaPartyRepository;
 import nl.logius.ebms.cpa.repository.CpaRepository;
 import nl.logius.ebms.cpa.repository.PartnerCertificateRepository;
@@ -38,6 +39,7 @@ class CpaServicePartySyncTest {
     @Mock CpaRepository cpaRepository;
     @Mock CpaPartyRepository partyRepository;
     @Mock CpaDeliveryChannelRepository channelRepository;
+    @Mock CpaOutboundRouteRepository routeRepository;
     @Mock PartnerCertificateRepository certRepository;
     @Mock CpaMapper cpaMapper;
     @Mock CpaPartyXmlParser partyXmlParser;
@@ -58,6 +60,7 @@ class CpaServicePartySyncTest {
             return CpaDto.builder().cpaId(e.getCpaId()).cpaXml(e.getCpaXml()).build();
         });
         lenient().when(partyXmlParser.parseCpaId(any())).thenReturn(CPA_ID);
+        lenient().when(routeRepository.findByCpaId(any())).thenReturn(List.of());
         lenient().when(partyXmlParser.parseStartDate(any())).thenReturn(null);
         lenient().when(partyXmlParser.parseEndDate(any())).thenReturn(null);
     }

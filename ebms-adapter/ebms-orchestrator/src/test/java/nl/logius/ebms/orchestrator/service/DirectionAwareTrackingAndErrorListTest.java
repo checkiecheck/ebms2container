@@ -151,6 +151,45 @@ class DirectionAwareTrackingAndErrorListTest {
         }
 
         @Test
+        @DisplayName("claimForProcessing - RECEIVED retry resumes processing instead of duplicate ACK")
+        void claim_received_returnsRetryAndMovesToProcessing() {
+            EbmsMessageEntity existing = EbmsMessageEntity.builder()
+                .messageId(MID).conversationId("c").cpaId("cpa-1")
+                .fromPartyId("OIN-A").toPartyId("OIN-B")
+                .service("svc").action("send")
+                .direction(MessageDirection.INBOUND).status(MessageStatus.RECEIVED)
+                .timestamp(Instant.now()).build();
+            when(repo.findByMessageIdAndDirection(MID, MessageDirection.INBOUND))
+                .thenReturn(Optional.of(existing));
+
+            InboundMessageTrackingService.ClaimResult result =
+                inboundTracking.claimForProcessing(header, "<retry/>", "OIN-A");
+
+            assertThat(result.status()).isEqualTo(InboundMessageTrackingService.ClaimStatus.RETRY);
+            assertThat(existing.getStatus()).isEqualTo(MessageStatus.PROCESSING);
+            verify(repo).save(existing);
+        }
+
+        @Test
+        @DisplayName("claimForProcessing - DELIVERED is a duplicate, not a new delivery")
+        void claim_delivered_returnsDuplicate() {
+            EbmsMessageEntity existing = EbmsMessageEntity.builder()
+                .messageId(MID).conversationId("c").cpaId("cpa-1")
+                .fromPartyId("OIN-A").toPartyId("OIN-B")
+                .service("svc").action("send")
+                .direction(MessageDirection.INBOUND).status(MessageStatus.DELIVERED)
+                .timestamp(Instant.now()).build();
+            when(repo.findByMessageIdAndDirection(MID, MessageDirection.INBOUND))
+                .thenReturn(Optional.of(existing));
+
+            InboundMessageTrackingService.ClaimResult result =
+                inboundTracking.claimForProcessing(header, "<duplicate/>", "OIN-A");
+
+            assertThat(result.status()).isEqualTo(InboundMessageTrackingService.ClaimStatus.DUPLICATE);
+            verify(repo, never()).save(any(EbmsMessageEntity.class));
+        }
+
+        @Test
         @DisplayName("I-7 - recordDuplicate increments duplicate_count, sets last_duplicate_at, DOES NOT touch status/content")
         void recordDuplicate_preservesOriginal_updatesDupCounter() {
             Instant originalTs = Instant.parse("2026-01-01T00:00:00Z");

@@ -34,7 +34,7 @@ import static org.mockito.ArgumentMatchers.anyString;
  * Focused Mockito unit test for {@link MessageStatusReconciliationScheduler}:
  *  - OUTBOUND uses threshold = now - stuck-processing-timeout-minutes (default 5)
  *  - INBOUND uses a separate, longer threshold = now - inbound-stuck-processing-timeout-minutes (default 30)
- *  - stuck entities (either direction) are marked FAILED with a non-null errorMessage
+ *  - outbound stuck entities are FAILED; inbound stuck entities return to RECEIVED for sender retry
  *  - saveAll() called per direction that has stuck entities
  *  - noop (no saveAll) when repository returns empty list for both directions
  */
@@ -98,7 +98,7 @@ class MessageStatusReconciliationSchedulerTest {
 
         verify(repo).markStuckProcessingAsFailed(
             eq(c.getId()), eq(MessageDirection.INBOUND), any(Instant.class), eq(c.getVersion()),
-            eq(MessageStatus.FAILED), org.mockito.ArgumentMatchers.contains("downstream-consument"));
+            eq(MessageStatus.RECEIVED), org.mockito.ArgumentMatchers.contains("downstream-consument"));
     }
 
     @Test

@@ -35,6 +35,51 @@ public class InboundMessageTrackingService {
 
     private final EbmsMessageRepository messageRepository;
 
+    public enum ClaimStatus { NEW, RETRY, DUPLICATE, IN_PROGRESS, PERMANENT_FAILURE }
+
+    public record ClaimResult(ClaimStatus status, String errorCode, String errorMessage) {}
+
+    /**
+     * Claimt een inbound bericht atomair voordat het naar RabbitMQ wordt gepubliceerd.
+     * De PostgreSQL advisory lock voorkomt dat twee orchestrator-replica's hetzelfde
+     * messageId gelijktijdig als nieuw claimen.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public ClaimResult claimForProcessing(EbxmlMessageHeader header, String processedSoap,
+            String clientOin) {
+        String messageId = header.getMessageInfo().getMessageId();
+        messageRepository.lockMessageId(messageId);
+
+        Optional<EbmsMessageEntity> existing = findExistingInbound(messageId);
+        if (existing.isEmpty()) {
+            EbmsMessageEntity entity = buildEntity(header, processedSoap, clientOin);
+            entity.setStatus(MessageStatus.PROCESSING);
+            messageRepository.saveAndFlush(entity);
+            return new ClaimResult(ClaimStatus.NEW, null, null);
+        }
+
+        EbmsMessageEntity entity = existing.get();
+        return switch (entity.getStatus()) {
+            case DELIVERED, PROCESSED, ACKNOWLEDGED ->
+                new ClaimResult(ClaimStatus.DUPLICATE, null, null);
+            case PROCESSING ->
+                new ClaimResult(ClaimStatus.IN_PROGRESS, null, null);
+            case RECEIVED -> {
+                entity.setRawSoapXml(processedSoap);
+                entity.setStatus(MessageStatus.PROCESSING);
+                messageRepository.save(entity);
+                yield new ClaimResult(ClaimStatus.RETRY, null, null);
+            }
+            case FAILED -> {
+                String stored = entity.getErrorMessage();
+                String errorCode = extractErrorCode(stored);
+                String errorMessage = extractErrorMessage(stored);
+                yield new ClaimResult(ClaimStatus.PERMANENT_FAILURE, errorCode, errorMessage);
+            }
+            default -> new ClaimResult(ClaimStatus.RETRY, null, null);
+        };
+    }
+
     /** Persisteert het succesvol gevalideerde bericht (status=RECEIVED). Idempotente upsert. */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public EbmsMessageEntity persistReceived(EbxmlMessageHeader header, String processedSoap, String clientOin) {
@@ -82,6 +127,26 @@ public class InboundMessageTrackingService {
         }, () -> log.warn("[INBOUND] Duplicaat gedetecteerd maar geen bestaande INBOUND-rij gevonden: messageId={}", messageId));
     }
 
+    /** Registreert een tijdelijke fout als nog niet afgeleverd, zodat een sender-retry kan hervatten. */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void markRetryableFailure(EbxmlMessageHeader header, String rawSoap, String clientOin,
+            String errorMessage) {
+        String messageId = header.getMessageInfo().getMessageId();
+        messageRepository.lockMessageId(messageId);
+        Optional<EbmsMessageEntity> existing = findExistingInbound(messageId);
+        if (existing.isPresent()) {
+            EbmsMessageEntity entity = existing.get();
+            entity.setStatus(MessageStatus.RECEIVED);
+            entity.setErrorMessage("[TEMPORARY_FAILURE] " + errorMessage);
+            messageRepository.save(entity);
+            return;
+        }
+        EbmsMessageEntity entity = buildEntity(header, rawSoap, clientOin);
+        entity.setStatus(MessageStatus.RECEIVED);
+        entity.setErrorMessage("[TEMPORARY_FAILURE] " + errorMessage);
+        messageRepository.saveAndFlush(entity);
+    }
+
     /**
      * Persisteert een afgewezen/mislukt inbound-bericht als FAILED met foutdetail. Idempotente
      * upsert; draait altijd in een eigen, direct-committende transactie zodat dit overeind blijft
@@ -122,6 +187,18 @@ public class InboundMessageTrackingService {
 
     private Optional<EbmsMessageEntity> findExistingInbound(String messageId) {
         return messageRepository.findByMessageIdAndDirection(messageId, MessageDirection.INBOUND);
+    }
+
+    private String extractErrorCode(String errorMessage) {
+        if (errorMessage == null || !errorMessage.startsWith("[")) return "MessageRejected";
+        int end = errorMessage.indexOf(']');
+        return end > 1 ? errorMessage.substring(1, end) : "MessageRejected";
+    }
+
+    private String extractErrorMessage(String errorMessage) {
+        if (errorMessage == null) return "Message was previously rejected";
+        int end = errorMessage.indexOf("] ");
+        return end >= 0 ? errorMessage.substring(end + 2) : errorMessage;
     }
 
     private EbmsMessageEntity buildEntity(EbxmlMessageHeader header, String rawSoap, String clientOin) {

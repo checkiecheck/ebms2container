@@ -80,8 +80,10 @@ public class MessageStatusReconciliationScheduler {
         for (EbmsMessageEntity msg : stuck) {
             String errorMessage = "Watchdog: " + direction + "-bericht bleef langer dan " + timeoutMinutes
                 + " minuten in PROCESSING-status zonder afronding" + reasonSuffix;
+            MessageStatus recoveryStatus = direction == MessageDirection.INBOUND
+                ? MessageStatus.RECEIVED : MessageStatus.FAILED;
             int updated = messageRepository.markStuckProcessingAsFailed(
-                msg.getId(), direction, threshold, msg.getVersion(), MessageStatus.FAILED, errorMessage);
+                msg.getId(), direction, threshold, msg.getVersion(), recoveryStatus, errorMessage);
             if (updated == 1) {
                 log.warn("[WATCHDOG] messageId={} gemarkeerd als FAILED (laatst bijgewerkt: {})",
                     msg.getMessageId(), msg.getUpdatedAt());

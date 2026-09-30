@@ -22,6 +22,7 @@ public class VerifyRequest {
     /** Optioneel bericht-ID voor audit-logging. */
     private String messageId;
 
-    /** Optioneel CPA-partnercertificaat waarmee de handtekening moet worden gevalideerd. */
+    /** Vertrouwd CPA-partnercertificaat waarmee de handtekening moet worden gevalideerd. */
+    @NotBlank(message = "certificatePem mag niet leeg zijn")
     private String certificatePem;
 }

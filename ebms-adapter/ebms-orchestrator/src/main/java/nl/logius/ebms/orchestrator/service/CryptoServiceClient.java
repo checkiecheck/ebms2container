@@ -2,6 +2,7 @@ package nl.logius.ebms.orchestrator.service;
 
 import lombok.extern.slf4j.Slf4j;
 import nl.logius.ebms.common.exception.XmlSecurityException;
+import nl.logius.ebms.common.model.cpa.PartnerCertificateDto;
 import nl.logius.ebms.common.model.crypto.DecryptResponse;
 import nl.logius.ebms.common.model.crypto.EncryptResponse;
 import nl.logius.ebms.common.model.crypto.SignResponse;
@@ -14,6 +15,7 @@ import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.RestClient;
 
 import java.util.Map;
+import java.util.List;
 
 /**
  * Zero-Trust facade naar de afgeschermde {@code crypto-service} (:8082).
@@ -130,14 +132,42 @@ public class CryptoServiceClient {
 
         } catch (HttpClientErrorException | HttpServerErrorException e) {
             log.error("[CRYPTO] Verificatie mislukt: messageId={} status={}", messageId, e.getStatusCode());
-            throw new XmlSecurityException(
-                "XML-DSig verificatie mislukt (HTTP " + e.getStatusCode() + "): " + e.getResponseBodyAsString());
+            throw new XmlSecurityException("XML-DSig verificatie mislukt");
         } catch (XmlSecurityException e) {
             throw e;
         } catch (Exception e) {
             log.error("[CRYPTO] Verificatie onbereikbaar: messageId={}", messageId, e);
-            throw new XmlSecurityException("crypto-service onbereikbaar: " + e.getMessage());
+            throw new XmlSecurityException("XML-DSig verificatie tijdelijk niet beschikbaar");
         }
+    }
+
+    /**
+     * Verifieert tegen alle geldige signingcertificaten uit de CPA, zodat een
+     * gecontroleerde certificaatrotatie geen berichten onderbreekt.
+     */
+    public boolean verifyAgainstCertificates(String signedXml, String messageId,
+            List<PartnerCertificateDto> certificates) {
+        if (certificates == null || certificates.isEmpty()) {
+            throw new XmlSecurityException(
+                "Signature verification failed: no CPA registered signing certificate for sender");
+        }
+
+        XmlSecurityException lastFailure = null;
+        for (PartnerCertificateDto certificate : certificates) {
+            if (certificate == null || certificate.getCertificatePem() == null
+                    || certificate.getCertificatePem().isBlank()) {
+                continue;
+            }
+            try {
+                return verify(signedXml, messageId, certificate.getCertificatePem());
+            } catch (XmlSecurityException e) {
+                lastFailure = e;
+            }
+        }
+
+        throw new XmlSecurityException(
+            "Signature verification failed: certificate does not match CPA registered signing certificates for sender",
+            lastFailure);
     }
 
     // ── XML-Enc ───────────────────────────────────────────────────────────────

@@ -102,7 +102,9 @@ public class OrchestratorService {
             CpaValidationResult cpaResult = cpaValidationService.validateCpaAndOin(cpaId, clientOin);
             if (!cpaResult.isValid()) {
                 log.warn("[CPA-BLOCKED] messageId={} reden={}", messageId, cpaResult.getErrorMessage());
-                throw new EbmsException("CPA_VALIDATION_FAILED", cpaResult.getErrorMessage());
+                String code = cpaResult.isServiceUnavailable()
+                    ? "TEMPORARY_FAILURE" : "CPA_VALIDATION_FAILED";
+                throw new EbmsException(code, cpaResult.getErrorMessage());
             }
 
             // 2. Inbound decryptie (Digikoppeling osb-*-e profielen: decrypt dan verify)
@@ -116,19 +118,40 @@ public class OrchestratorService {
             // 3. Inbound handtekeningverificatie (Digikoppeling osb-*-s profielen)
             if (soapHelper.hasSignature(request)) {
                 log.info("[INBOUND] Ondertekend bericht – verificatie: messageId={}", messageId);
-                cryptoServiceClient.verify(processedSoap, messageId);
+                String fromPartyId = header.getFrom().isEmpty()
+                    ? null : header.getFrom().get(0).getValue();
+                if (fromPartyId == null || fromPartyId.isBlank()) {
+                    throw new EbmsException("SecurityFailure",
+                        "Signature verification failed: sender PartyId is missing");
+                }
+                List<PartnerCertificateDto> signingCertificates = cpaValidationService
+                    .getPartnerCertificates(cpaId, fromPartyId).stream()
+                    .filter(this::isSigningCertificate)
+                    .toList();
+                if (signingCertificates.isEmpty()) {
+                    throw new EbmsException("SecurityFailure",
+                        "Signature verification failed: no CPA registered signing certificate for sender");
+                }
+                cryptoServiceClient.verifyAgainstCertificates(
+                    processedSoap, messageId, signingCertificates);
                 log.info("[INBOUND] Handtekening geverifieerd: messageId={}", messageId);
             }
 
-            // 4. Duplicate suppression
-            if (messageRepository.existsByMessageId(messageId)) {
+            // 4. Claim vóór publicatie: duplicate-elimination is statusbewust en atomair.
+            InboundMessageTrackingService.ClaimResult claim = trackingService
+                .claimForProcessing(header, processedSoap, clientOin);
+            if (claim.status() == InboundMessageTrackingService.ClaimStatus.DUPLICATE) {
                 log.warn("[DUPLICATE] messageId={}", messageId);
                 persistDuplicate(messageId, header);
                 throw new DuplicateMessageException(messageId);
             }
-
-            // ── Direct persisteren (eigen, altijd-committende transactie) ──
-            trackingService.persistReceived(header, processedSoap, clientOin);
+            if (claim.status() == InboundMessageTrackingService.ClaimStatus.IN_PROGRESS) {
+                throw new EbmsException("TEMPORARY_IN_PROGRESS",
+                    "Message is currently being processed");
+            }
+            if (claim.status() == InboundMessageTrackingService.ClaimStatus.PERMANENT_FAILURE) {
+                throw new EbmsException(claim.errorCode(), claim.errorMessage());
+            }
 
             // 6. Publiceer op AMQP inbound queue
             EbmsInboundMessage amqpMsg = EbmsInboundMessage.builder()
@@ -138,10 +161,15 @@ public class OrchestratorService {
                 .rawSoapXml(processedSoap)
                 .receivedAt(Instant.now())
                 .build();
-            rabbitTemplate.convertAndSend(
-                RabbitMqConfig.EXCHANGE_EBMS,
-                RabbitMqConfig.ROUTING_INBOUND,
-                amqpMsg);
+            try {
+                rabbitTemplate.convertAndSend(
+                    RabbitMqConfig.EXCHANGE_EBMS,
+                    RabbitMqConfig.ROUTING_INBOUND,
+                    amqpMsg);
+            } catch (Exception e) {
+                throw new EbmsException("TEMPORARY_FAILURE",
+                    "Inbound delivery temporarily unavailable", e);
+            }
 
             // 7. Publiceer audit-event
             publishAudit(AuditEvent.builder()
@@ -181,7 +209,14 @@ public class OrchestratorService {
         } catch (EbmsException e) {
             log.error("[INBOUND] Afgewezen: messageId={} code={} reden={}",
                 messageId, e.getErrorCode(), e.getMessage());
-            trackingService.persistFailed(header, rawSoap, clientOin, e.getMessage());
+            if ("TEMPORARY_FAILURE".equals(e.getErrorCode())) {
+                trackingService.markRetryableFailure(header, rawSoap, clientOin, e.getMessage());
+            } else if ("TEMPORARY_IN_PROGRESS".equals(e.getErrorCode())) {
+                // Een andere consumer bezit de claim; laat zijn PROCESSING-status intact.
+            } else {
+                trackingService.persistFailed(header, rawSoap, clientOin,
+                    "[" + e.getErrorCode() + "] " + e.getMessage());
+            }
             publishAudit(AuditEvent.builder()
                 .eventType("MESSAGE_REJECTED")
                 .messageId(messageId)
@@ -593,5 +628,15 @@ public class OrchestratorService {
         } catch (Exception e) {
             log.warn("Audit-event kon niet gepubliceerd worden: {}", e.getMessage());
         }
+    }
+
+    private boolean isSigningCertificate(PartnerCertificateDto certificate) {
+        if (certificate == null || certificate.getCertificatePem() == null
+                || certificate.getCertificatePem().isBlank()) {
+            return false;
+        }
+        String usage = certificate.getCertificateUsage();
+        return usage == null || usage.isBlank()
+            || usage.toUpperCase(java.util.Locale.ROOT).contains("SIGNING");
     }
 }

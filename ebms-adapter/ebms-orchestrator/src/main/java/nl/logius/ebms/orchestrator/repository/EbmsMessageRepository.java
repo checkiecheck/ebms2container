@@ -6,6 +6,7 @@ import nl.logius.ebms.orchestrator.entity.MessageStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -18,6 +19,10 @@ import java.util.UUID;
 
 @Repository
 public interface EbmsMessageRepository extends JpaRepository<EbmsMessageEntity, UUID> {
+
+  /** Serialiseert claims voor hetzelfde ebXML messageId over meerdere orchestrator-replica's. */
+  @Query(value = "SELECT pg_advisory_xact_lock(hashtext(:messageId))", nativeQuery = true)
+  Object lockMessageId(@Param("messageId") String messageId);
 
     /** Duplicate suppression: bestaat het bericht al in de database? */
     boolean existsByMessageId(String messageId);

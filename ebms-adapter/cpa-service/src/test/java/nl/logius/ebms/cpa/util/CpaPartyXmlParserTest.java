@@ -222,6 +222,15 @@ class CpaPartyXmlParserTest {
         assertThat(parser.parseCpaId("<Root><Unclosed>")).isNull();
     }
 
+    @Test
+    void parseCpaId_xmlWithDoctype_returnsNullWithoutResolvingExternalEntity() {
+        String xml = "<?xml version='1.0'?>"
+            + "<!DOCTYPE foo [<!ENTITY xxe SYSTEM 'file:///etc/passwd'>]>"
+            + "<CollaborationProtocolAgreement cpaId='&xxe;'/>";
+
+        assertThat(parser.parseCpaId(xml)).isNull();
+    }
+
     // ── Date parsing ─────────────────────────────────────────────────────
 
     @Test

@@ -99,6 +99,9 @@ class OrchestratorServiceReliableMessagingResponseTest {
             .thenReturn(CpaValidationResult.success(null));
         when(soapHelper.hasEncryptedBody(any())).thenReturn(false);
         when(soapHelper.hasSignature(any())).thenReturn(false);
+        when(trackingService.claimForProcessing(any(), anyString(), nullable(String.class)))
+            .thenReturn(new InboundMessageTrackingService.ClaimResult(
+                InboundMessageTrackingService.ClaimStatus.NEW, null, null));
         when(messageRepository.existsByMessageId(anyString())).thenReturn(false);
         when(soapHelper.createEmptyResponse()).thenReturn(emptyResponse);
         when(soapHelper.createAck(any())).thenReturn(embeddedAck);
@@ -225,7 +228,7 @@ class OrchestratorServiceReliableMessagingResponseTest {
         SOAPMessage response = service.processInboundMessage(request, h, "<raw-error/>", FROM_OIN);
 
         assertThat(response).isSameAs(emptyResponse);
-        verify(trackingService).persistReceived(h, "<raw-error/>", FROM_OIN);
+        verify(trackingService).claimForProcessing(h, "<raw-error/>", FROM_OIN);
         verify(trackingService).markProcessed(MESSAGE_ID);
         verify(trackingService, never()).markDelivered(MESSAGE_ID);
         verify(outboundTrackingService).markFailed("outbound-ref-1",
@@ -238,7 +241,7 @@ class OrchestratorServiceReliableMessagingResponseTest {
     @DisplayName("Duplicate + async mode -> leeg antwoord + nieuwe async ACK-trigger (Gap 1)")
     void duplicate_asyncMode_returnsEmptyAndTriggersAsyncAck() {
         EbxmlMessageHeader h = header(true);
-        when(messageRepository.existsByMessageId(MESSAGE_ID)).thenReturn(true);
+        mockDuplicateClaim();
         mockChannelSyncReplyMode("none");
 
         SOAPMessage response = service.processInboundMessage(request, h, "<raw/>", FROM_OIN);
@@ -256,7 +259,7 @@ class OrchestratorServiceReliableMessagingResponseTest {
     @DisplayName("Duplicate + sync mode -> regenerated embedded ACK (Gap 1)")
     void duplicate_syncMode_returnsRegeneratedEmbeddedAck() {
         EbxmlMessageHeader h = header(true);
-        when(messageRepository.existsByMessageId(MESSAGE_ID)).thenReturn(true);
+        mockDuplicateClaim();
         mockChannelSyncReplyMode("mshSignalsOnly");
 
         SOAPMessage response = service.processInboundMessage(request, h, "<raw/>", FROM_OIN);
@@ -272,7 +275,7 @@ class OrchestratorServiceReliableMessagingResponseTest {
     @DisplayName("Duplicate + signed=true -> opnieuw signeren en geen DuplicateElimination")
     void duplicate_syncMode_signedAck_signsRegeneratedResponse() {
         EbxmlMessageHeader h = header(true, true);
-        when(messageRepository.existsByMessageId(MESSAGE_ID)).thenReturn(true);
+        mockDuplicateClaim();
         mockChannelSyncReplyMode("mshSignalsOnly");
         when(soapHelper.soapToString(embeddedAck)).thenReturn("<unsigned-ack/>");
         when(cryptoServiceClient.sign("<unsigned-ack/>", "signing-key", MESSAGE_ID))
@@ -292,7 +295,7 @@ class OrchestratorServiceReliableMessagingResponseTest {
     @DisplayName("Duplicate zonder AckRequested -> lege response, geen async ACK")
     void duplicate_noAckRequested_returnsEmptyNoAckTrigger() {
         EbxmlMessageHeader h = header(false);
-        when(messageRepository.existsByMessageId(MESSAGE_ID)).thenReturn(true);
+        mockDuplicateClaim();
 
         SOAPMessage response = service.processInboundMessage(request, h, "<raw/>", FROM_OIN);
 
@@ -306,7 +309,7 @@ class OrchestratorServiceReliableMessagingResponseTest {
     @DisplayName("Duplicate -> AMQP inbound queue NIET opnieuw gepubliceerd (geen dubbele bezorging)")
     void duplicate_doesNotRepublishToInboundQueue() {
         EbxmlMessageHeader h = header(true);
-        when(messageRepository.existsByMessageId(MESSAGE_ID)).thenReturn(true);
+        mockDuplicateClaim();
         mockChannelSyncReplyMode(null);
 
         service.processInboundMessage(request, h, "<raw/>", FROM_OIN);
@@ -317,6 +320,12 @@ class OrchestratorServiceReliableMessagingResponseTest {
             eq(nl.logius.ebms.orchestrator.config.RabbitMqConfig.EXCHANGE_EBMS),
             eq(nl.logius.ebms.orchestrator.config.RabbitMqConfig.ROUTING_INBOUND),
             (Object) any());
+    }
+
+    private void mockDuplicateClaim() {
+        when(trackingService.claimForProcessing(any(), anyString(), nullable(String.class)))
+            .thenReturn(new InboundMessageTrackingService.ClaimResult(
+                InboundMessageTrackingService.ClaimStatus.DUPLICATE, null, null));
     }
 
     @Test

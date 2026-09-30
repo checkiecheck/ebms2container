@@ -191,28 +191,16 @@ public class XmlSigningService {
             Element signatureElement = (Element) signatures.item(0);
             XMLSignature signature   = new XMLSignature(signatureElement, "");
 
-            // Gebruik bij ACK's het door de CPA geleverde certificaat; KeyInfo is fallback
-            // voor bestaande inkomende businessberichten zonder CPA-certificaatparameter.
-            boolean valid = false;
-            if (certificatePem != null && !certificatePem.isBlank()) {
-                CertificateFactory factory = CertificateFactory.getInstance("X.509");
-                X509Certificate cert = (X509Certificate) factory.generateCertificate(
-                    new ByteArrayInputStream(certificatePem.getBytes(StandardCharsets.UTF_8)));
-                valid = signature.checkSignatureValue(cert);
-                log.debug("[XML-VERIFY] CPA-certificaat: subject={}", cert.getSubjectX500Principal());
-            } else {
-                org.apache.xml.security.keys.KeyInfo ki = signature.getKeyInfo();
-                if (ki != null) {
-                    X509Certificate cert = ki.getX509Certificate();
-                    if (cert != null) {
-                        valid = signature.checkSignatureValue(cert);
-                        log.debug("[XML-VERIFY] Certificaat uit KeyInfo: subject={}", cert.getSubjectX500Principal());
-                    } else {
-                        PublicKey pk = ki.getPublicKey();
-                        if (pk != null) valid = signature.checkSignatureValue(pk);
-                    }
-                }
+            if (certificatePem == null || certificatePem.isBlank()) {
+                throw new XmlSecurityException(
+                    "Signature verification failed: trusted CPA signing certificate is required");
             }
+            CertificateFactory factory = CertificateFactory.getInstance("X.509");
+            X509Certificate cert = (X509Certificate) factory.generateCertificate(
+                new ByteArrayInputStream(certificatePem.getBytes(StandardCharsets.UTF_8)));
+            cert.checkValidity();
+            boolean valid = signature.checkSignatureValue(cert);
+            log.debug("[XML-VERIFY] CPA-certificaat: subject={}", cert.getSubjectX500Principal());
 
             String result = valid ? "SUCCESS" : "FAILURE";
             persistAudit("XML_VERIFY", null, messageId, result,

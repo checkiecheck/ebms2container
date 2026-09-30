@@ -48,6 +48,8 @@ public class EbmsMessageProvider implements Provider<SOAPMessage> {
     @Override
     public SOAPMessage invoke(SOAPMessage request) {
         String clientOin = extractClientOin();
+        EbxmlMessageHeader header = null;
+        String messageId = null;
 
         try {
             SOAPHeader soapHeader = request.getSOAPHeader();
@@ -57,11 +59,12 @@ public class EbmsMessageProvider implements Provider<SOAPMessage> {
                     "InvalidHeader", "SOAP Header ontbreekt", null);
             }
 
-            EbxmlMessageHeader header = soapHelper.parseMessageHeader(soapHeader);
+            header = soapHelper.parseMessageHeader(soapHeader);
             if (header == null || header.getMessageInfo() == null) {
                 return soapHelper.createErrorResponse(
                     "InvalidHeader", "ebXML MessageHeader ontbreekt of ongeldig", null);
             }
+            messageId = header.getMessageInfo().getMessageId();
 
             header.setClientOin(clientOin);
 
@@ -95,12 +98,32 @@ public class EbmsMessageProvider implements Provider<SOAPMessage> {
         } catch (EbmsException e) {
             log.error("[SECURITY] Bericht afgewezen: errorCode={} msg={} clientOin={}",
                 e.getErrorCode(), e.getMessage(), clientOin);
-            return soapHelper.createErrorResponse(e.getErrorCode(), e.getMessage(), null);
+            if (e.getErrorCode().startsWith("TEMPORARY_")) {
+                setHttpResponseCode(503);
+                return soapHelper.createEmptyResponse();
+            }
+            return soapHelper.createErrorResponse(e.getErrorCode(), externalErrorDescription(e), messageId);
         } catch (Exception e) {
             log.error("Fout bij verwerking ebMS2 bericht (clientOin={})", clientOin, e);
             return soapHelper.createErrorResponse(
-                "Unknown", "Interne verwerkingsfout: " + e.getMessage(), null);
+                "Unknown", "Message could not be processed", messageId);
         }
+    }
+
+    private String externalErrorDescription(EbmsException exception) {
+        if ("SecurityFailure".equals(exception.getErrorCode())) {
+            String message = exception.getMessage();
+            if (message != null && message.startsWith("Signature verification failed:")) {
+                return message;
+            }
+            return "Security validation failed";
+        }
+        return switch (exception.getErrorCode()) {
+            case "InvalidHeader" -> "Invalid ebXML message header";
+            case "CPA_VALIDATION_FAILED", "CPA_SERVICE_UNAVAILABLE" ->
+                "CPA validation could not be completed";
+            default -> "Message could not be processed";
+        };
     }
 
     // ── Rauwe payload-extractie ────────────────────────────────────────────
@@ -180,12 +203,14 @@ public class EbmsMessageProvider implements Provider<SOAPMessage> {
             Object servletResponse = messageContext.get(MessageContext.SERVLET_RESPONSE);
             if (servletResponse instanceof HttpServletResponse response) {
                 response.setStatus(statusCode);
-                try {
-                    // CXF vervangt een ongecommitteerde null Provider-response door HTTP 202.
-                    response.flushBuffer();
-                } catch (java.io.IOException e) {
-                    throw new IllegalStateException(
-                        "Kan HTTP " + statusCode + "-response niet committen", e);
+                if (statusCode == 204) {
+                    try {
+                        // CXF vervangt een ongecommitteerde null Provider-response door HTTP 202.
+                        response.flushBuffer();
+                    } catch (java.io.IOException e) {
+                        throw new IllegalStateException(
+                            "Kan HTTP " + statusCode + "-response niet committen", e);
+                    }
                 }
             }
         }

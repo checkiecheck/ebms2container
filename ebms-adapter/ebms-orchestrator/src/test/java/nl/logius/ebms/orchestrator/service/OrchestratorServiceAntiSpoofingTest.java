@@ -6,6 +6,7 @@ import nl.logius.ebms.common.model.ebxml.EbxmlMessageHeader;
 import nl.logius.ebms.common.model.ebxml.MessageInfo;
 import nl.logius.ebms.common.model.ebxml.PartyId;
 import nl.logius.ebms.common.model.ebxml.ServiceType;
+import nl.logius.ebms.common.model.cpa.PartnerCertificateDto;
 import nl.logius.ebms.orchestrator.repository.EbmsMessageRepository;
 import nl.logius.ebms.orchestrator.soap.SoapHelper;
 import org.junit.jupiter.api.BeforeEach;
@@ -92,6 +93,9 @@ class OrchestratorServiceAntiSpoofingTest {
             .thenReturn(CpaValidationResult.success(null));
         when(soapHelper.hasEncryptedBody(any())).thenReturn(false);
         when(soapHelper.hasSignature(any())).thenReturn(false);
+        when(trackingService.claimForProcessing(any(), anyString(), nullable(String.class)))
+            .thenReturn(new InboundMessageTrackingService.ClaimResult(
+                InboundMessageTrackingService.ClaimStatus.NEW, null, null));
         when(messageRepository.existsByMessageId(anyString())).thenReturn(false);
         when(soapHelper.createEmptyResponse()).thenReturn(soapMessage);
     }
@@ -103,7 +107,7 @@ class OrchestratorServiceAntiSpoofingTest {
 
         assertThat(response).isNotNull();
         verify(cpaValidationService).validateCpaAndOin(CPA_ID, FROM_OIN);
-        verify(trackingService).persistReceived(eq(header), anyString(), eq(FROM_OIN));
+        verify(trackingService).claimForProcessing(eq(header), anyString(), eq(FROM_OIN));
         verify(trackingService).markDelivered(MESSAGE_ID);
         verify(trackingService, never()).persistFailed(any(), any(), any(), any());
         verify(rabbitTemplate, org.mockito.Mockito.atLeastOnce())
@@ -161,5 +165,43 @@ class OrchestratorServiceAntiSpoofingTest {
         // Continues into CPA validation (proves no step-0 rejection).
         verify(cpaValidationService).validateCpaAndOin(eq(CPA_ID), isNull());
         verify(trackingService, never()).persistFailed(any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("Signed inbound bericht gebruikt CPA signing certificate, niet KeyInfo")
+    void signedInbound_usesCpaSigningCertificate() {
+        when(soapHelper.hasSignature(any())).thenReturn(true);
+        PartnerCertificateDto certificate = PartnerCertificateDto.builder()
+            .cpaId(CPA_ID)
+            .partyId(FROM_OIN)
+            .certificateUsage("SIGNING")
+            .certificatePem("-----BEGIN CERTIFICATE-----\npartner\n-----END CERTIFICATE-----")
+            .build();
+        when(cpaValidationService.getPartnerCertificates(CPA_ID, FROM_OIN))
+            .thenReturn(List.of(certificate));
+
+        service.processInboundMessage(soapMessage, header, "<raw/>", FROM_OIN);
+
+        verify(cryptoServiceClient).verifyAgainstCertificates(
+            eq("<raw/>"), eq(MESSAGE_ID), eq(List.of(certificate)));
+    }
+
+    @Test
+    @DisplayName("Signed inbound bericht zonder CPA signing certificate wordt geweigerd")
+    void signedInbound_withoutSigningCertificate_rejects() {
+        when(soapHelper.hasSignature(any())).thenReturn(true);
+        PartnerCertificateDto encryptionCertificate = PartnerCertificateDto.builder()
+            .cpaId(CPA_ID)
+            .partyId(FROM_OIN)
+            .certificateUsage("ENCRYPTION")
+            .certificatePem("-----BEGIN CERTIFICATE-----\npartner\n-----END CERTIFICATE-----")
+            .build();
+        when(cpaValidationService.getPartnerCertificates(CPA_ID, FROM_OIN))
+            .thenReturn(List.of(encryptionCertificate));
+
+        assertThatThrownBy(() ->
+            service.processInboundMessage(soapMessage, header, "<raw/>", FROM_OIN)
+        ).isInstanceOfSatisfying(EbmsException.class, ex ->
+            assertThat(ex.getErrorCode()).isEqualTo("SecurityFailure"));
     }
 }

@@ -93,8 +93,10 @@ public class CpaValidationService {
                 log.debug("[CPA-VALIDATION] OIN {} geautoriseerd voor CPA {}", clientOin, cpaId);
 
             } catch (Exception e) {
-                // Fail-open voor OIN: log maar blokkeer niet (vermijd lock-out bij cpa-serviceprobleem)
-                log.warn("[CPA-VALIDATION] OIN-lookup gefaald voor {} (fail-open): {}", clientOin, e.getMessage());
+                // OIN is een autorisatiebesluit: bij een lookup-fout mag verwerking niet doorgaan.
+                log.error("[CPA-VALIDATION] OIN-lookup gefaald voor {} (fail-closed): {}",
+                    clientOin, e.getMessage());
+                return CpaValidationResult.serviceUnavailable("OIN-autorisatie kon niet worden vastgesteld");
             }
         }
 

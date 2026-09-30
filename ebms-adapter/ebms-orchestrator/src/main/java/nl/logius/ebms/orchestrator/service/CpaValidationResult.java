@@ -13,10 +13,7 @@ public final class CpaValidationResult {
     private final String  errorMessage;
     private final CpaDto  cpa;
 
-    /**
-     * True als de cpa-service niet bereikbaar was (fail-open scenario).
-     * In productie moet dit fail-closed zijn.
-     */
+    /** True als validatie niet kon worden uitgevoerd en de flow fail-closed is gestopt. */
     private final boolean serviceUnavailable;
 
     private CpaValidationResult(boolean valid, String errorMessage,

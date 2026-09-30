@@ -2,13 +2,11 @@ package nl.logius.ebms.cpa.util;
 
 import lombok.extern.slf4j.Slf4j;
 import java.time.Instant;
-import java.io.StringReader;
 import javax.xml.parsers.DocumentBuilderFactory;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
 import org.w3c.dom.NamedNodeMap;
-import org.xml.sax.InputSource;
 import nl.logius.ebms.common.model.cpa.PartyInfoDto;
 import nl.logius.ebms.common.util.OinValidator;
 import nl.logius.ebms.cpa.entity.CpaDeliveryChannelEntity;
@@ -52,9 +50,7 @@ public class CpaPartyXmlParser {
 public String parseCpaId(String cpaXml) {
     if (cpaXml == null || cpaXml.isBlank()) return null;
     try {
-        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-        factory.setNamespaceAware(true);
-        Document doc = factory.newDocumentBuilder().parse(new InputSource(new StringReader(cpaXml)));
+        Document doc = parseDocument(cpaXml);
         Element root = doc.getDocumentElement();
         return getLenientAttribute(root, "cpaId");
     } catch (Exception e) {
@@ -85,9 +81,7 @@ public Instant parseEndDate(String cpaXml) {
 private String parseDateAttribute(String cpaXml, String attributeName) {
     if (cpaXml == null || cpaXml.isBlank()) return null;
     try {
-        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-        factory.setNamespaceAware(true);
-        Document doc = factory.newDocumentBuilder().parse(new InputSource(new StringReader(cpaXml)));
+        Document doc = parseDocument(cpaXml);
         Element root = doc.getDocumentElement();
         
         // Look for <tns:Start> or <Start> element values inside root

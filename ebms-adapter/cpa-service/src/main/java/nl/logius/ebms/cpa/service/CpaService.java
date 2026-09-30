@@ -86,7 +86,10 @@ public class CpaService {
 
     @Transactional(readOnly = true)
     public List<PartnerCertificateEntity> findValidCertificates(String cpaId, String partyId) {
-        return certRepository.findByCpaIdAndPartyIdAndValidUntilAfter(cpaId, partyId, Instant.now());
+        Instant now = Instant.now();
+        return certRepository.findByCpaIdAndPartyIdAndValidUntilAfter(cpaId, partyId, now).stream()
+            .filter(cert -> cert.getValidFrom() == null || !cert.getValidFrom().isAfter(now))
+            .toList();
     }
 
     /**

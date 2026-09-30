@@ -6,6 +6,7 @@ import nl.logius.ebms.common.model.cpa.CpaDto;
 import nl.logius.ebms.cpa.entity.CpaEntity;
 import nl.logius.ebms.cpa.mapper.CpaMapper;
 import nl.logius.ebms.cpa.repository.CpaDeliveryChannelRepository;
+import nl.logius.ebms.cpa.repository.CpaOutboundRouteRepository;
 import nl.logius.ebms.cpa.repository.CpaPartyRepository;
 import nl.logius.ebms.cpa.repository.CpaRepository;
 import nl.logius.ebms.cpa.repository.PartnerCertificateRepository;
@@ -20,6 +21,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -39,6 +41,7 @@ class CpaServiceUpdateTest {
     @Mock  CpaRepository cpaRepository;
     @Mock  CpaPartyRepository partyRepository;
     @Mock  CpaDeliveryChannelRepository channelRepository;
+    @Mock  CpaOutboundRouteRepository routeRepository;
     @Mock  PartnerCertificateRepository certRepository;
     @Mock  CpaMapper cpaMapper;
     @Mock  CpaPartyXmlParser partyXmlParser;
@@ -54,6 +57,7 @@ class CpaServiceUpdateTest {
     void setUp() {
         lenient().when(partyXmlParser.parseParties(any())).thenReturn(new ArrayList<>());
         lenient().when(partyXmlParser.parseCpaId(any())).thenReturn(CPA_ID);
+        lenient().when(routeRepository.findByCpaId(any())).thenReturn(List.of());
         // Default to null for dates, specific tests will override if needed
         lenient().when(partyXmlParser.parseStartDate(any())).thenReturn(null);
         lenient().when(partyXmlParser.parseEndDate(any())).thenReturn(null);

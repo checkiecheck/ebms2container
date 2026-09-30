@@ -311,6 +311,9 @@ public class SoapHelper {
                 msg.getSOAPPart().getEnvelope().createName("errorCode", "eb", EBXML_MSG_NS), errorCode);
             error.addAttribute(
                 msg.getSOAPPart().getEnvelope().createName("severity", "eb", EBXML_MSG_NS), "Error");
+            error.addAttribute(
+                msg.getSOAPPart().getEnvelope().createName("codeContext", "eb", EBXML_MSG_NS),
+                "urn:oasis:names:tc:ebxml-msg:service:errors");
             if (refToMessageId != null) {
                 error.addAttribute(
                     msg.getSOAPPart().getEnvelope().createName("refToMessageInError", "eb", EBXML_MSG_NS),
