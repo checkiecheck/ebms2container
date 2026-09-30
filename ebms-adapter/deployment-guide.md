@@ -37,6 +37,24 @@ Dit handboek beschrijft de volledige deployment en configuratie van de container
 - **mTLS Exposition:** mTLS Passthrough of Gateway SSL-termination met validatie tegen de PKIoverheid Staat der Nederlanden CA-keten. *Op productie wordt de Ingress/Gateway ontsloten via een LoadBalancer of Ingress Controller op poort 443/8443 (geen port-forwarding).* 
 - **Inbound Paden:** Routering van inkomende ebMS SOAP-berichten direct naar `ebms-ebms-orchestrator:8080/services/ebms`.
 - **OIN Validatie:** De Ingress/API Gateway valideert de client-certificaat OIN uit de mTLS-handshake en geeft deze via de HTTP-header `X-Forwarded-Client-OIN` door aan de Orchestrator.
+- **Beheerautorisatie:** In dev/test kan `ebms-orchestrator.ingress.auth.required=false` blijven en zijn de beheer-routes onbeschermd binnen de testomgeving. In productie zet de deployment dit op `true`; `/admin`, `/api/admin` en `/api/cpa` worden dan door een aparte Kong-route beschermd met de extern beheerde plugin uit `ebms-orchestrator.ingress.auth.admin.plugin`.
+- **Authenticatie-ontkoppeling:** SOAP gebruikt onafhankelijk `ebms-orchestrator.ingress.auth.soap.plugin`. De chart kiest geen methode en vereist geen OIDC; de plugin kan bijvoorbeeld JWT, Basic Auth, mTLS of een organisatie-eigen Kong-plugin zijn.
+- **Crypto-isolatie:** `crypto-service` krijgt geen Ingress-route en blijft uitsluitend als `ClusterIP` bereikbaar. De admin/CPA-plugin geldt dus niet als toegang tot crypto.
+
+Voorbeeld met extern aangemaakte KongPlugins:
+
+```yaml
+ebms-orchestrator:
+  ingress:
+    auth:
+      admin:
+        plugin: ebms-admin-oidc
+      soap:
+        plugin: ebms-soap-mtls
+    required: true
+```
+
+Bij `required=true` faalt Helm-rendering zonder admin-plugin bewust. De Java-services bevatten geen authenticatie- of provider-specifieke code.
 
 #### B. Logius Compliance / Testsuite-omgeving [Specifiek voor Testsuite / Simulatie]
 - **Host Aliases:** Interne DNS/HostAliases in de K8s Pod spec voor `proxy-dart` en `proxy-cvwus` (koppelend aan het netwerk-IP van de testomgeving).
@@ -142,25 +160,9 @@ spec:
   tls:
     termination: edge
     insecureEdgeTerminationPolicy: Redirect
----
-apiVersion: route.openshift.io/v1
-kind: Route
-metadata:
-  name: ebms-route-crypto-api
-  namespace: ebms-adapter
-spec:
-  host: ebms-admin.gemeente.nl
-  path: /api/crypto
-  to:
-    kind: Service
-    name: ebms-crypto-service
-    weight: 100
-  port:
-    targetPort: 8082
-  tls:
-    termination: edge
-    insecureEdgeTerminationPolicy: Redirect
 ```
+
+Er wordt bewust geen externe OpenShift Route voor `crypto-service` aangemaakt. Deze service blijft intern bereikbaar; eventuele beheer- of crypto-operaties lopen via gecontroleerde interne service-to-service communicatie.
 
 ### OpenShift Toepassen:
 ```bash

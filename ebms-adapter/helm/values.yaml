@@ -25,20 +25,28 @@ ebms-orchestrator:
   ingress:
     enabled: true
     className: "kong"
-    annotations:
-      konghq.com/protocols: "https"
-      konghq.com/strip-path: "false"
-      konghq.com/preserve-host: "true"
-      konghq.com/plugins: "ebms-rate-limit"
+    auth:
+      # Authenticatie blijft een Kong-plugin buiten de Java-services. Kies per route
+      # bijvoorbeeld oidc, jwt, basic-auth of een organisatie-eigen plugin.
+      # Dev/test: false = geen auth-plugin. Productie: true = admin-plugin verplicht.
+      required: false
+      admin:
+        plugin: ""
+      soap:
+        plugin: ""
+    soap:
+      annotations:
+        konghq.com/protocols: "https"
+        konghq.com/strip-path: "false"
+        konghq.com/preserve-host: "true"
     hosts:
       - host: ebms.example.com
-        paths:
-          - path: /soap/ebms
-            pathType: Prefix
-          - path: /admin
-            pathType: Prefix
-          - path: /api/admin
-            pathType: Prefix
+        soapPath: /soap/ebms
+    admin:
+      annotations:
+        konghq.com/protocols: "https"
+        konghq.com/strip-path: "false"
+        konghq.com/preserve-host: "true"
     # Extra Kong-route op dezelfde host/ingress: stuurt /api/cpa door naar cpa-service
     # zodat de admin-dashboard (static/admin/index.html, CPA Beheer-tab) op hetzelfde
     # origin bij cpa-service kan (geen CORS nodig). strip-path=false (zie annotations
