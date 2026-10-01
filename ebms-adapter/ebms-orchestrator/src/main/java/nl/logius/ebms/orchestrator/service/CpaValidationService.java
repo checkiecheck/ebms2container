@@ -9,8 +9,10 @@ import nl.logius.ebms.common.model.cpa.PartnerCertificateDto;
 import nl.logius.ebms.common.model.cpa.PartyInfoDto;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestClient;
 
 import java.util.List;
@@ -128,16 +130,22 @@ public class CpaValidationService {
             return channel;
 
         } catch (HttpClientErrorException e) {
+            if (isTemporaryDependencyStatus(e.getStatusCode())) {
+                throw temporaryCpaFailure("kanaal-lookup", e);
+            }
             // FIX: Vangt elke 4xx-fout (bijv 400 BadRequest of 404 NotFound) op als functionele domeinfout!
             throw new EbmsException("CHANNEL_NOT_FOUND",
                 "Afleverkanaal niet gevonden: CPA=" + cpaId + " party=" + toPartyId + 
                 " (" + e.getStatusCode() + "): " + e.getResponseBodyAsString());
         } catch (EbmsException e) {
             throw e;
-        } catch (Exception e) {
+        } catch (RestClientException e) {
             log.error("[CPA] cpa-service onbereikbaar bij kanaal-lookup: {}", e.getMessage());
+            throw temporaryCpaFailure("kanaal-lookup", e);
+        } catch (Exception e) {
+            log.error("[CPA] Onverwachte fout bij kanaal-lookup", e);
             throw new EbmsException("CPA_SERVICE_UNAVAILABLE",
-                "cpa-service onbereikbaar voor kanaal-lookup: " + e.getMessage());
+                "CPA-kanaal kon niet worden opgehaald");
         }
     }
 
@@ -176,15 +184,21 @@ public class CpaValidationService {
             throw new EbmsException("ROUTE_AMBIGUOUS",
                 "Outbound CPA-route is niet eenduidig: " + e.getResponseBodyAsString());
         } catch (HttpClientErrorException e) {
+            if (isTemporaryDependencyStatus(e.getStatusCode())) {
+                throw temporaryCpaFailure("route-lookup", e);
+            }
             throw new EbmsException("CPA_ROUTE_INVALID",
                 "CPA-route kon niet worden bepaald (" + e.getStatusCode() + "): "
                     + e.getResponseBodyAsString());
         } catch (EbmsException e) {
             throw e;
-        } catch (Exception e) {
+        } catch (RestClientException e) {
             log.error("[CPA] cpa-service onbereikbaar bij outbound route-lookup: {}", e.getMessage());
+            throw temporaryCpaFailure("route-lookup", e);
+        } catch (Exception e) {
+            log.error("[CPA] Onverwachte fout bij outbound route-lookup", e);
             throw new EbmsException("CPA_SERVICE_UNAVAILABLE",
-                "cpa-service onbereikbaar voor outbound route-lookup: " + e.getMessage());
+                "CPA-route kon niet worden opgehaald");
         }
     }
 
@@ -220,12 +234,32 @@ public class CpaValidationService {
         } catch (HttpClientErrorException.NotFound e) {
             throw new EbmsException("CERTIFICATE_NOT_FOUND",
                 "Geen partnercertificaat gevonden: CPA=" + cpaId + " party=" + partyId);
+        } catch (HttpClientErrorException e) {
+            if (isTemporaryDependencyStatus(e.getStatusCode())) {
+                throw temporaryCpaFailure("certificaat-lookup", e);
+            }
+            throw new EbmsException("CPA_CERTIFICATE_LOOKUP_FAILED",
+                "CPA-certificaten konden niet worden opgehaald (" + e.getStatusCode() + ")");
         } catch (EbmsException e) {
             throw e;
-        } catch (Exception e) {
+        } catch (RestClientException e) {
             log.error("[CPA] cpa-service onbereikbaar bij certificaat-lookup: {}", e.getMessage());
-            throw new EbmsException("CPA_SERVICE_UNAVAILABLE",
-                "cpa-service onbereikbaar voor certificaat-lookup: " + e.getMessage());
+            throw temporaryCpaFailure("certificaat-lookup", e);
+        } catch (Exception e) {
+            log.error("[CPA] Onverwachte fout bij certificaat-lookup", e);
+            throw new EbmsException("CPA_CERTIFICATE_LOOKUP_FAILED",
+                "CPA-certificaten konden niet worden opgehaald");
         }
+    }
+
+    private boolean isTemporaryDependencyStatus(HttpStatusCode status) {
+        int code = status.value();
+        return status.is5xxServerError() || code == 401 || code == 403 || code == 408 || code == 429;
+    }
+
+    private EbmsException temporaryCpaFailure(String operation, Exception cause) {
+        log.warn("[CPA] Tijdelijke afhankelijkheidsfout tijdens {}: {}", operation, cause.getMessage());
+        return new EbmsException("TEMPORARY_FAILURE",
+            "CPA-service tijdelijk niet beschikbaar", cause);
     }
 }

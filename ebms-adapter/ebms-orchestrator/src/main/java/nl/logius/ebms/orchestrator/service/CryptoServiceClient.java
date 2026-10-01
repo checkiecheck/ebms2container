@@ -1,6 +1,7 @@
 package nl.logius.ebms.orchestrator.service;
 
 import lombok.extern.slf4j.Slf4j;
+import nl.logius.ebms.common.exception.EbmsException;
 import nl.logius.ebms.common.exception.XmlSecurityException;
 import nl.logius.ebms.common.model.cpa.PartnerCertificateDto;
 import nl.logius.ebms.common.model.crypto.DecryptResponse;
@@ -8,10 +9,11 @@ import nl.logius.ebms.common.model.crypto.EncryptResponse;
 import nl.logius.ebms.common.model.crypto.SignResponse;
 import nl.logius.ebms.common.model.crypto.VerifyResponse;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.HttpClientErrorException;
-import org.springframework.web.client.HttpServerErrorException;
+import org.springframework.web.client.HttpStatusCodeException;
+import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestClient;
 
 import java.util.Map;
@@ -79,15 +81,17 @@ public class CryptoServiceClient {
             log.debug("[CRYPTO] Ondertekening geslaagd: messageId={}", messageId);
             return response.getBody().getSignedXml();
 
-        } catch (HttpClientErrorException | HttpServerErrorException e) {
+        } catch (HttpStatusCodeException e) {
             log.error("[CRYPTO] Signing mislukt: messageId={} status={}", messageId, e.getStatusCode());
-            throw new XmlSecurityException(
-                "XML-DSig signing mislukt (HTTP " + e.getStatusCode() + "): " + e.getResponseBodyAsString());
+            throw mapCryptoHttpFailure("XML-DSig signing", e);
         } catch (XmlSecurityException e) {
             throw e;
-        } catch (Exception e) {
+        } catch (RestClientException e) {
             log.error("[CRYPTO] Signing onbereikbaar: messageId={}", messageId, e);
-            throw new XmlSecurityException("crypto-service onbereikbaar: " + e.getMessage());
+            throw temporaryCryptoFailure(e);
+        } catch (Exception e) {
+            log.error("[CRYPTO] Onverwachte signing-fout: messageId={}", messageId, e);
+            throw new XmlSecurityException("XML-DSig signing mislukt");
         }
     }
 
@@ -130,14 +134,17 @@ public class CryptoServiceClient {
             }
             return true;
 
-        } catch (HttpClientErrorException | HttpServerErrorException e) {
+        } catch (HttpStatusCodeException e) {
             log.error("[CRYPTO] Verificatie mislukt: messageId={} status={}", messageId, e.getStatusCode());
-            throw new XmlSecurityException("XML-DSig verificatie mislukt");
+            throw mapCryptoHttpFailure("XML-DSig verificatie", e);
         } catch (XmlSecurityException e) {
             throw e;
-        } catch (Exception e) {
+        } catch (RestClientException e) {
             log.error("[CRYPTO] Verificatie onbereikbaar: messageId={}", messageId, e);
-            throw new XmlSecurityException("XML-DSig verificatie tijdelijk niet beschikbaar");
+            throw temporaryCryptoFailure(e);
+        } catch (Exception e) {
+            log.error("[CRYPTO] Onverwachte verificatiefout: messageId={}", messageId, e);
+            throw new XmlSecurityException("XML-DSig verificatie mislukt");
         }
     }
 
@@ -199,15 +206,17 @@ public class CryptoServiceClient {
             log.debug("[CRYPTO] Versleuteling geslaagd: messageId={}", messageId);
             return response.getBody().getEncryptedXml();
 
-        } catch (HttpClientErrorException | HttpServerErrorException e) {
+        } catch (HttpStatusCodeException e) {
             log.error("[CRYPTO] Versleuteling mislukt: messageId={} status={}", messageId, e.getStatusCode());
-            throw new XmlSecurityException(
-                "XML-Enc versleuteling mislukt (HTTP " + e.getStatusCode() + "): " + e.getResponseBodyAsString());
+            throw mapCryptoHttpFailure("XML-Enc versleuteling", e);
         } catch (XmlSecurityException e) {
             throw e;
-        } catch (Exception e) {
+        } catch (RestClientException e) {
             log.error("[CRYPTO] Versleuteling onbereikbaar: messageId={}", messageId, e);
-            throw new XmlSecurityException("crypto-service onbereikbaar: " + e.getMessage());
+            throw temporaryCryptoFailure(e);
+        } catch (Exception e) {
+            log.error("[CRYPTO] Onverwachte versleutelingsfout: messageId={}", messageId, e);
+            throw new XmlSecurityException("XML-Enc versleuteling mislukt");
         }
     }
 
@@ -238,15 +247,32 @@ public class CryptoServiceClient {
             log.debug("[CRYPTO] Ontsleuteling geslaagd: messageId={}", messageId);
             return response.getBody().getDecryptedXml();
 
-        } catch (HttpClientErrorException | HttpServerErrorException e) {
+        } catch (HttpStatusCodeException e) {
             log.error("[CRYPTO] Ontsleuteling mislukt: messageId={} status={}", messageId, e.getStatusCode());
-            throw new XmlSecurityException(
-                "XML-Enc ontsleuteling mislukt (HTTP " + e.getStatusCode() + "): " + e.getResponseBodyAsString());
+            throw mapCryptoHttpFailure("XML-Enc ontsleuteling", e);
         } catch (XmlSecurityException e) {
             throw e;
-        } catch (Exception e) {
+        } catch (RestClientException e) {
             log.error("[CRYPTO] Ontsleuteling onbereikbaar: messageId={}", messageId, e);
-            throw new XmlSecurityException("crypto-service onbereikbaar: " + e.getMessage());
+            throw temporaryCryptoFailure(e);
+        } catch (Exception e) {
+            log.error("[CRYPTO] Onverwachte ontsleutelingsfout: messageId={}", messageId, e);
+            throw new XmlSecurityException("XML-Enc ontsleuteling mislukt");
         }
+    }
+
+    private RuntimeException mapCryptoHttpFailure(String operation, HttpStatusCodeException failure) {
+        HttpStatusCode status = failure.getStatusCode();
+        int code = status.value();
+        if (status.is5xxServerError() || code == 401 || code == 403 || code == 408 || code == 429) {
+            return new EbmsException("TEMPORARY_FAILURE",
+                "Crypto-service tijdelijk niet beschikbaar", failure);
+        }
+        return new XmlSecurityException(operation + " geweigerd door crypto-service");
+    }
+
+    private EbmsException temporaryCryptoFailure(Exception cause) {
+        return new EbmsException("TEMPORARY_FAILURE",
+            "Crypto-service tijdelijk niet beschikbaar", cause);
     }
 }
