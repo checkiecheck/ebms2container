@@ -899,6 +899,17 @@ INBOUND bericht dat vastzat op PROCESSING liep elke ~10 minuten in een eindeloze
 - [ ] SOAP MTOM-attachment verwerking
 - [ ] ACK-ontvangst verwerking (inkomende Acknowledgment berichten)
 
+### P2 – Code review remainder (geparkeerd – 1 oktober 2026)
+- [ ] Productiesecrets volledig uit defaults en repositoryvoorbeelden verwijderen;
+  productie alleen via Vault/Kubernetes Secrets laten configureren en placeholderwaarden
+  in CI blokkeren.
+- [ ] Actuator-healthdetails en environment/info-exposure beperken tot interne probes of een
+  afgeschermde managementroute.
+- [ ] Kubernetes NetworkPolicies toevoegen voor east-west-isolatie, met name voor crypto-service,
+  CPA-service, PostgreSQL en RabbitMQ.
+- [ ] Crashvenster na succesvolle RabbitMQ-publicatie maar vóór `DELIVERED` oplossen of expliciet
+  operationaliseren; downstream-consumers moeten tot die tijd idempotent op `messageId` zijn.
+
 ---
 
 ## Digikoppeling Profielen

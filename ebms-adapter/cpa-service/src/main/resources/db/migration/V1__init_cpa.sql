@@ -79,7 +79,7 @@ CREATE TABLE IF NOT EXISTS cpa_delivery_channel (
     endpoint_url         VARCHAR(500),
 
     -- Reliable Messaging parameters (alleen bij rm-profielen)
-    retry_count          SMALLINT,
+    retry_count          INTEGER,
     retry_interval       INTEGER,      -- seconden
     persist_duration     INTEGER,      -- seconden (MessageExpiry)
 
