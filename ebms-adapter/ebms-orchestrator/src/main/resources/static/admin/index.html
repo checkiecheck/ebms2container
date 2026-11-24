@@ -106,8 +106,14 @@
           <div class="flex-1 h-px bg-slate-800"></div>
         </div>
         <div class="mt-3 flex gap-2">
-          <input id="cpaSearchInput" data-testid="cpa-search-input" type="text" placeholder="CPA ID..."
-            class="flex-1 bg-slate-950 border border-slate-700 rounded-md px-3 py-2 text-sm placeholder-slate-600 focus:outline-none focus:border-emerald-500" />
+          <div class="relative flex-1">
+            <input id="cpaSearchInput" data-testid="cpa-search-input" type="text" autocomplete="off"
+              placeholder="Klik voor alle CPA's of zoek op ID, omschrijving, partij/OIN..."
+              role="combobox" aria-expanded="false" aria-controls="cpaSuggestions" aria-autocomplete="list"
+              class="w-full bg-slate-950 border border-slate-700 rounded-md px-3 py-2 text-sm placeholder-slate-600 focus:outline-none focus:border-emerald-500" />
+            <ul id="cpaSuggestions" data-testid="cpa-suggestions" role="listbox"
+              class="hidden absolute z-20 left-0 right-0 mt-1 max-h-72 overflow-y-auto rounded-md border border-slate-700 bg-slate-900 shadow-xl text-sm"></ul>
+          </div>
           <button id="cpaFetchBtn" data-testid="cpa-fetch-button"
             class="px-4 py-2 rounded-md border border-slate-700 hover:bg-slate-800 text-sm transition-colors">
             Ophalen
@@ -817,6 +823,7 @@
         document.getElementById('cpaStatusToggleWrap').classList.add('hidden');
         document.getElementById('cpaUploadBtn').disabled = true;
         setUploadStatus(`CPA ${cpaId} verwijderd.`, 'success');
+        cpaListLoaded = false;
       } catch (err) {
         setUploadStatus(`Verwijderen mislukt: ${err.message}`, 'error');
       }
@@ -927,6 +934,7 @@
         renderStatusToggle(saved);
         renderNetworkMap(lastParsedCpa, true);
         fetchAndRenderChannels(saved.cpaId);
+        cpaListLoaded = false;
         setUploadStatus(
           `CPA succesvol ${exists ? 'overschreven' : 'opgeslagen'} (cpaId=${saved.cpaId})`, 'success');
       } catch (err) {
@@ -934,8 +942,7 @@
       }
     };
 
-    document.getElementById('cpaFetchBtn').onclick = async () => {
-      const cpaId = document.getElementById('cpaSearchInput').value.trim();
+    async function loadCpa(cpaId) {
       if (!cpaId) return;
       setUploadStatus('Ophalen...', 'info');
       try {
@@ -954,7 +961,128 @@
       } catch (err) {
         setUploadStatus(`Ophalen mislukt: ${err.message}`, 'error');
       }
-    };
+    }
+
+    document.getElementById('cpaFetchBtn').onclick = () =>
+      loadCpa(document.getElementById('cpaSearchInput').value.trim());
+
+    // ── Autocomplete / lijst van bestaande CPA's ──────────────────────────────
+    const cpaSearchInput = document.getElementById('cpaSearchInput');
+    const cpaSuggestions = document.getElementById('cpaSuggestions');
+    let cpaList = [];
+    let cpaListLoaded = false;
+    let suggestionItems = [];
+    let activeSuggestion = -1;
+
+    function escapeHtml(s) {
+      return String(s ?? '').replace(/[&<>"']/g, c =>
+        ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+
+    async function refreshCpaList() {
+      try {
+        const res = await fetch(CPA_API_URL);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        cpaList = (await res.json())
+          .map(c => ({ cpaId: c.cpaId, description: c.description, status: c.status,
+                       parties: c.parties || [] }))
+          .sort((a, b) => String(a.cpaId).localeCompare(String(b.cpaId)));
+        cpaListLoaded = true;
+      } catch (_) {
+        cpaListLoaded = false;
+      }
+    }
+
+    function cpaMatches(cpa, terms) {
+      const haystack = [cpa.cpaId, cpa.description, cpa.status,
+        ...cpa.parties.flatMap(p => [p.partyId, p.oin, p.role, p.service])]
+        .filter(Boolean).join(' ').toLowerCase();
+      return terms.every(t => haystack.includes(t));
+    }
+
+    function setActiveSuggestion(idx) {
+      activeSuggestion = idx;
+      suggestionItems.forEach((li, i) => {
+        li.classList.toggle('bg-slate-800', i === idx);
+        if (i === idx) li.scrollIntoView({ block: 'nearest' });
+      });
+    }
+
+    function closeSuggestions() {
+      cpaSuggestions.classList.add('hidden');
+      cpaSearchInput.setAttribute('aria-expanded', 'false');
+      activeSuggestion = -1;
+    }
+
+    function renderSuggestions() {
+      const terms = cpaSearchInput.value.toLowerCase().split(/\s+/).filter(Boolean);
+      const matches = cpaList.filter(c => cpaMatches(c, terms));
+      if (matches.length === 0) {
+        cpaSuggestions.innerHTML = `<li class="px-3 py-2 text-slate-500">${
+          cpaListLoaded ? 'Geen CPA\'s gevonden' : 'CPA-lijst kon niet worden geladen'}</li>`;
+        suggestionItems = [];
+      } else {
+        cpaSuggestions.innerHTML = matches.map((c, i) => {
+          const active = String(c.status || '').toUpperCase() === 'ACTIVE';
+          return `<li role="option" data-cpa-id="${escapeHtml(c.cpaId)}" data-testid="cpa-suggestion-${i}"
+              class="px-3 py-2 cursor-pointer hover:bg-slate-800 border-b border-slate-800/60 last:border-0">
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-slate-100 font-medium break-all">${escapeHtml(c.cpaId)}</span>
+                <span class="text-xs ${active ? 'text-emerald-400' : 'text-amber-400'}">${escapeHtml(c.status)}</span>
+              </div>
+              ${c.description ? `<div class="text-xs text-slate-500">${escapeHtml(c.description)}</div>` : ''}
+            </li>`;
+        }).join('');
+        suggestionItems = [...cpaSuggestions.querySelectorAll('li[data-cpa-id]')];
+      }
+      activeSuggestion = -1;
+      cpaSuggestions.classList.remove('hidden');
+      cpaSearchInput.setAttribute('aria-expanded', 'true');
+    }
+
+    async function openSuggestions() {
+      if (!cpaListLoaded) await refreshCpaList();
+      renderSuggestions();
+    }
+
+    function selectCpa(cpaId) {
+      cpaSearchInput.value = cpaId;
+      closeSuggestions();
+      loadCpa(cpaId);
+    }
+
+    cpaSearchInput.addEventListener('focus', openSuggestions);
+    cpaSearchInput.addEventListener('click', openSuggestions);
+    cpaSearchInput.addEventListener('input', openSuggestions);
+    cpaSearchInput.addEventListener('keydown', (e) => {
+      const open = !cpaSuggestions.classList.contains('hidden');
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (!open) return openSuggestions();
+        if (suggestionItems.length === 0) return;
+        const step = e.key === 'ArrowDown' ? 1 : -1;
+        setActiveSuggestion((activeSuggestion + step + suggestionItems.length) % suggestionItems.length);
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (open && activeSuggestion >= 0) selectCpa(suggestionItems[activeSuggestion].dataset.cpaId);
+        else { closeSuggestions(); loadCpa(cpaSearchInput.value.trim()); }
+      } else if (e.key === 'Escape') {
+        closeSuggestions();
+      }
+    });
+    // mousedown i.p.v. click: voorkomt dat blur/close de selectie onderschept
+    cpaSuggestions.addEventListener('mousedown', (e) => {
+      const li = e.target.closest('li[data-cpa-id]');
+      if (!li) return;
+      e.preventDefault();
+      selectCpa(li.dataset.cpaId);
+    });
+    document.addEventListener('mousedown', (e) => {
+      if (!e.target.closest('#cpaSearchInput, #cpaSuggestions')) closeSuggestions();
+    });
+
+    // Lijst vers houden na upload/verwijderen en bij openen van de tab
+    tabCpaBtn.addEventListener('click', () => { cpaListLoaded = false; });
   </script>
 </body>
 </html>
