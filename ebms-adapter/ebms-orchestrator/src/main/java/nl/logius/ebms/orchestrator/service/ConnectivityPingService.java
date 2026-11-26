@@ -45,7 +45,7 @@ public class ConnectivityPingService {
 
             SOAPMessage ping = soapHelper.buildOutboundSoap(pingHeader, false);
             SOAPMessage response = outboundSoapClient.send(
-                channel.getEndpointUrl(), soapHelper.soapToString(ping), cpaId, toPartyId);
+                channel.getEndpointUrl(), soapHelper.soapToString(ping), cpaId, fromPartyId, toPartyId);
             validatePong(response, messageId);
             return ConnectivityPingResult.success(elapsedMillis(startedAt));
         } catch (EbmsException e) {

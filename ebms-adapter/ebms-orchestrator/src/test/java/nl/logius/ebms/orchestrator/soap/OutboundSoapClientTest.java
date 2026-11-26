@@ -5,7 +5,6 @@ import nl.logius.ebms.common.model.ebxml.EbxmlMessageHeader;
 import nl.logius.ebms.common.model.ebxml.MessageInfo;
 import nl.logius.ebms.common.model.ebxml.PartyId;
 import nl.logius.ebms.common.model.ebxml.ServiceType;
-import nl.logius.ebms.orchestrator.service.CpaValidationService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -20,6 +19,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 class OutboundSoapClientTest {
 
@@ -62,15 +62,17 @@ class OutboundSoapClientTest {
             .build();
         SOAPMessage message = soapHelper.buildOutboundSoap(header, false);
 
-        OutboundSoapClient client = new OutboundSoapClient(
-            new EbmsOutboundSSLProperties(), mock(CpaValidationService.class), soapHelper);
+        OutboundSslContextFactory sslContextFactory = mock(OutboundSslContextFactory.class);
+        OutboundSoapClient client = new OutboundSoapClient(sslContextFactory, soapHelper);
         client.send(
             "http://localhost:" + server.getAddress().getPort() + "/ebms",
             soapHelper.soapToString(message),
             "cpa-1",
+            "from",
             "to");
 
         assertThat(soapAction.get()).isEqualTo("\"ebXML\"");
+        verifyNoInteractions(sslContextFactory); // plain http bouwt geen mTLS-context
     }
 
     @Test
@@ -97,12 +99,13 @@ class OutboundSoapClientTest {
         SOAPMessage message = soapHelper.buildOutboundSoap(header, false);
 
         OutboundSoapClient client = new OutboundSoapClient(
-            new EbmsOutboundSSLProperties(), mock(CpaValidationService.class), soapHelper);
+            mock(OutboundSslContextFactory.class), soapHelper);
 
         SOAPMessage response = client.send(
             "http://localhost:" + server.getAddress().getPort() + "/ebms",
             soapHelper.soapToString(message),
             "cpa-1",
+            "from",
             "to");
 
         assertThat(response).isNull();
@@ -133,12 +136,13 @@ class OutboundSoapClientTest {
         SOAPMessage message = soapHelper.buildOutboundSoap(header, false);
 
         OutboundSoapClient client = new OutboundSoapClient(
-            new EbmsOutboundSSLProperties(), mock(CpaValidationService.class), soapHelper);
+            mock(OutboundSslContextFactory.class), soapHelper);
 
         assertThatThrownBy(() -> client.send(
                 "http://localhost:" + server.getAddress().getPort() + "/ebms",
                 soapHelper.soapToString(message),
                 "cpa-1",
+                "from",
                 "to"))
             .isInstanceOf(nl.logius.ebms.common.exception.EbmsException.class)
             .satisfies(ex -> assertThat(((nl.logius.ebms.common.exception.EbmsException) ex).getErrorCode())
@@ -159,12 +163,13 @@ class OutboundSoapClientTest {
 
         SoapHelper soapHelper = new SoapHelper();
         OutboundSoapClient client = new OutboundSoapClient(
-            new EbmsOutboundSSLProperties(), mock(CpaValidationService.class), soapHelper);
+            mock(OutboundSslContextFactory.class), soapHelper);
 
         assertThatThrownBy(() -> client.send(
                 "http://localhost:" + server.getAddress().getPort() + "/ebms",
                 "<soap:Envelope xmlns:soap=\"http://schemas.xmlsoap.org/soap/envelope/\"><soap:Body/></soap:Envelope>",
                 "cpa-1",
+                "from",
                 "to"))
             .isInstanceOf(nl.logius.ebms.common.exception.EbmsException.class)
             .satisfies(ex -> {

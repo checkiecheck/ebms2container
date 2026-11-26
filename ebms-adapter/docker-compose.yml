@@ -185,9 +185,15 @@ services:
       SPRING_RABBITMQ_VIRTUAL_HOST: ebms
       CPA_SERVICE_URL:              http://cpa-service:8081
       CRYPTO_SERVICE_URL:           http://crypto-service:8082
+      KEYSTORE_PATH:                /app/keystores/keystore.p12
+      KEYSTORE_PASSWORD:            ${KEYSTORE_PASSWORD:-changeit}
+      TRUSTSTORE_PATH:              /app/keystores/truststore.p12
+      TRUSTSTORE_PASSWORD:          ${TRUSTSTORE_PASSWORD:-changeit}
       SPRING_PROFILES_ACTIVE:       prod
     ports:
       - "8080:8080"   # SOAP endpoint: http://localhost:8080/services
+    volumes:
+      - crypto-keystores:/app/keystores:ro   # outbound mTLS: keystore.p12 + truststore.p12
     depends_on:
       postgres-orchestrator:
         condition: service_healthy

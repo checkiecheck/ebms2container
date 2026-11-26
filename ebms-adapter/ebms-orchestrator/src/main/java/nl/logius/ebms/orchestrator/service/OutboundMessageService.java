@@ -134,7 +134,7 @@ public class OutboundMessageService {
             trackingService.createOrUpdateProcessing(messageId, message, header, rawSoapXml, channel);
 
             // ── 6. Versturen via CXF SOAP-client ──────────────────────────
-            outboundSoapClient.send(channel.getEndpointUrl(), rawSoapXml, cpaId, toPartyId);
+            outboundSoapClient.send(channel.getEndpointUrl(), rawSoapXml, cpaId, fromPartyId, toPartyId);
 
             // ── 7. Status-machine bijwerken ────────────────────────────────
             trackingService.markSentOrDelivered(messageId, requireAck || awaitAsyncSignal);

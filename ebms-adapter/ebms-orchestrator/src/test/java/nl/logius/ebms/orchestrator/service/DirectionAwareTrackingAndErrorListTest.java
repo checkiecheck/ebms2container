@@ -332,7 +332,7 @@ class DirectionAwareTrackingAndErrorListTest {
             stubHappyChannel("osb-be");
             Mockito.doThrow(new EbmsException("PARTNER_REJECTED",
                     "ebXML ErrorList van partner endpoint: [SecurityFailure] mismatch"))
-                .when(outboundSoapClient).send(anyString(), anyString(), anyString(), anyString());
+                .when(outboundSoapClient).send(anyString(), anyString(), anyString(), anyString(), anyString());
 
             service.handleOutboundMessage(outboundMessage, amqpChannel, 1L);
 
@@ -356,7 +356,7 @@ class DirectionAwareTrackingAndErrorListTest {
             verify(trackingService).markFailed(eq("msg-42"), errCap.capture());
             assertThat(errCap.getValue()).contains("SecurityFailure");
             verify(trackingService, never()).markSentOrDelivered(anyString(), anyBoolean());
-            verify(outboundSoapClient, never()).send(anyString(), anyString(), anyString(), anyString());
+            verify(outboundSoapClient, never()).send(anyString(), anyString(), anyString(), anyString(), anyString());
             verify(amqpChannel).basicNack(anyLong(), anyBoolean(), eq(false));
         }
 
@@ -365,7 +365,7 @@ class DirectionAwareTrackingAndErrorListTest {
         void connectionError_isRetryable() throws Exception {
             stubHappyChannel("osb-be");
             Mockito.doThrow(new EbmsException("CONNECTION_ERROR", "socket timeout"))
-                .when(outboundSoapClient).send(anyString(), anyString(), anyString(), anyString());
+                .when(outboundSoapClient).send(anyString(), anyString(), anyString(), anyString(), anyString());
 
             service.handleOutboundMessage(outboundMessage, amqpChannel, 3L);
 

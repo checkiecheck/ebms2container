@@ -57,6 +57,8 @@ public class AckSendingService {
                 .messageId(header.getMessageInfo().getMessageId())
                 .cpaId(cpaId)
                 .fromPartyId(fromPartyId)
+                .toPartyId(header.getTo() == null || header.getTo().isEmpty()
+                    ? null : header.getTo().get(0).getValue())
                 .ackRequestedSigned(signed)
                 .build());
     }
@@ -102,7 +104,8 @@ public class AckSendingService {
         if (task.isAckRequestedSigned() || signedByProfile) {
             ackXml = cryptoServiceClient.sign(ackXml, signingKeyAlias, task.getMessageId());
         }
-        outboundSoapClient.send(channel.getEndpointUrl(), ackXml, task.getCpaId(), task.getFromPartyId());
+        outboundSoapClient.send(channel.getEndpointUrl(), ackXml, task.getCpaId(),
+            task.getToPartyId(), task.getFromPartyId());
         log.info("[INBOUND] Asynchrone ACK verstuurd: messageId={} naar endpoint={}",
             task.getMessageId(), channel.getEndpointUrl());
     }

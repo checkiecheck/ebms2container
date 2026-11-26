@@ -56,6 +56,7 @@ class AckSendingServiceTest {
     private EbxmlMessageHeader header;
     private static final String CPA_ID = "urn:test:cpa:async";
     private static final String FROM_PARTY_ID = "00000000000000000001";
+    private static final String TO_PARTY_ID = "00000000000000000002";
     private static final String MESSAGE_ID = "msg-async-1";
     private static final String ENDPOINT_URL = "https://sender.example.com/ebms";
 
@@ -66,6 +67,7 @@ class AckSendingServiceTest {
             .cpaId(CPA_ID)
             .conversationId("conv-1")
             .from(List.of(PartyId.builder().value(FROM_PARTY_ID).build()))
+            .to(List.of(PartyId.builder().value(TO_PARTY_ID).build()))
             .messageInfo(MessageInfo.builder().messageId(MESSAGE_ID).timestamp(Instant.now()).build())
             .build();
     }
@@ -87,7 +89,7 @@ class AckSendingServiceTest {
         verify(soapHelper).createAck(any());
         // REVERSE lookup: fromPartyId (afzender van origineel), niet toPartyId
         verify(cpaValidationService).getDeliveryChannel(CPA_ID, FROM_PARTY_ID);
-        verify(outboundSoapClient).send(eq(ENDPOINT_URL), eq("<ack/>"), eq(CPA_ID), eq(FROM_PARTY_ID));
+        verify(outboundSoapClient).send(eq(ENDPOINT_URL), eq("<ack/>"), eq(CPA_ID), eq(TO_PARTY_ID), eq(FROM_PARTY_ID));
     }
 
     @Test
@@ -108,7 +110,7 @@ class AckSendingServiceTest {
         service.dispatchAck(task(true));
 
         verify(cryptoServiceClient).sign("<unsigned-ack/>", "signing-key", MESSAGE_ID);
-        verify(outboundSoapClient).send(eq(ENDPOINT_URL), eq("<signed-ack/>"), eq(CPA_ID), eq(FROM_PARTY_ID));
+        verify(outboundSoapClient).send(eq(ENDPOINT_URL), eq("<signed-ack/>"), eq(CPA_ID), eq(TO_PARTY_ID), eq(FROM_PARTY_ID));
     }
 
     @Test
@@ -127,7 +129,7 @@ class AckSendingServiceTest {
         service.dispatchAck(task(false));
 
         verify(cryptoServiceClient).sign("<unsigned-ack/>", "signing-key", MESSAGE_ID);
-        verify(outboundSoapClient).send(eq(ENDPOINT_URL), eq("<signed-ack/>"), eq(CPA_ID), eq(FROM_PARTY_ID));
+        verify(outboundSoapClient).send(eq(ENDPOINT_URL), eq("<signed-ack/>"), eq(CPA_ID), eq(TO_PARTY_ID), eq(FROM_PARTY_ID));
     }
 
     @Test
@@ -139,7 +141,7 @@ class AckSendingServiceTest {
         assertThrows(IllegalArgumentException.class, () -> service.dispatchAck(task(false)));
 
         verify(soapHelper, never()).createAck(any());
-        verify(outboundSoapClient, never()).send(any(), any(), any(), any());
+        verify(outboundSoapClient, never()).send(any(), any(), any(), any(), any());
     }
 
     @Test
@@ -163,7 +165,7 @@ class AckSendingServiceTest {
 
         service.handleAsyncAck(task(false), amqpChannel, 7L);
 
-        verify(outboundSoapClient).send(eq(ENDPOINT_URL), eq("<ack/>"), eq(CPA_ID), eq(FROM_PARTY_ID));
+        verify(outboundSoapClient).send(eq(ENDPOINT_URL), eq("<ack/>"), eq(CPA_ID), eq(TO_PARTY_ID), eq(FROM_PARTY_ID));
         verify(amqpChannel).basicAck(7L, false);
     }
 
@@ -180,7 +182,7 @@ class AckSendingServiceTest {
 
     private EbmsAsyncAckMessage task(boolean signed) {
         return EbmsAsyncAckMessage.builder()
-            .messageId(MESSAGE_ID).cpaId(CPA_ID).fromPartyId(FROM_PARTY_ID)
+            .messageId(MESSAGE_ID).cpaId(CPA_ID).fromPartyId(FROM_PARTY_ID).toPartyId(TO_PARTY_ID)
             .ackRequestedSigned(signed).build();
     }
 

@@ -70,6 +70,11 @@ Bij `required=true` faalt Helm-rendering zonder admin-plugin bewust. De Java-ser
 #### A. Generieke Productie-omgeving [Productie & OTAP]
 - **Cryptografische Keystore (`keystore.p12`):** Bevat de PKIoverheid private key en certificaat voor XML-DSig onder de vereiste alias **`signing-key`** (en **`orchestrator-key`** voor mTLS).
 - **Truststore (`truststore.p12`):** Bevat de Root- en Intermediate certificaten van de Staat der Nederlanden / PKIoverheid voor validatie van tegenpartijen.
+- **Uitgaande mTLS (orchestrator):**
+  - *Server-TLS:* het HTTPS-servercertificaat van de partner wordt gevalideerd tegen `truststore.p12` **en** de standaard JVM-truststore (`EBMS_OUTBOUND_SSL_INCLUDE_JVM_TRUST`, default `true`; nodig voor publieke CA's zoals DigiCert). Het CPA-partnercertificaat is een berichtlaag-certificaat (XML-DSig/XML-Enc) en wordt **niet** als TLS-trust gebruikt, tenzij `EBMS_OUTBOUND_SSL_TRUST_CPA_CERTS=true` (alleen voor zelf-ondertekende testpartners). Hostname-verificatie blijft altijd actief.
+  - *Client-authenticatie:* het eigen certificaat uit de CPA (`fromPartyId`) wordt via fingerprint (of issuer+serial) gekoppeld aan een key-alias in `keystore.p12`. Alleen als de CPA geen (in de keystore aanwezig) eigen certificaat heeft, geldt de fallbackvolgorde `EBMS_MTLS_CLIENT_KEY_ALIAS` (default `orchestrator-key`) → `EBMS_SIGNING_KEY_ALIAS` (default `signing-key`).
+  - Het OIN in het clientcertificaat (subject `serialNumber`) wordt vergeleken met de eigen partij; bij afwijking volgt een waarschuwing, of een afwijzing met `EBMS_OUTBOUND_SSL_ENFORCE_OIN=true`.
+  - De `SSLContext` wordt gecachet (`EBMS_OUTBOUND_SSL_CACHE_TTL_SECONDS`, default 600) en vernieuwt automatisch bij gewijzigde keystore/truststore of CPA-certificaten.
 - **K8s Secret Mounting:** De PKCS12 bestanden worden als Kubernetes Secret (`crypto-keystore-secret`) gemount op het vaste pad `/app/keystores/` in de `crypto-service` en `ebms-orchestrator` pods.
 
 #### B. Logius Compliance / Testsuite-omgeving [Specifiek voor Testsuite]

@@ -42,6 +42,7 @@ class PingSendingServiceTest {
 
     private static final String CPA_ID = "CPAID_EchoService-1-0-HTTPS";
     private static final String FROM_PARTY = "00000004003214345001";
+    private static final String TO_PARTY = "00000002003214345001";
     private static final String ENDPOINT = "https://sender.example.com/ebms";
     private EbxmlMessageHeader pingHeader;
 
@@ -51,7 +52,7 @@ class PingSendingServiceTest {
             .cpaId(CPA_ID)
             .conversationId("conversation-1")
             .from(List.of(PartyId.builder().value(FROM_PARTY).build()))
-            .to(List.of(PartyId.builder().value("00000002003214345001").build()))
+            .to(List.of(PartyId.builder().value(TO_PARTY).build()))
             .messageInfo(MessageInfo.builder().messageId("ping-1").timestamp(Instant.now()).build())
             .build();
     }
@@ -78,7 +79,7 @@ class PingSendingServiceTest {
         service.dispatchPong(pingHeader);
 
         verify(cpaValidationService).getDeliveryChannel(CPA_ID, FROM_PARTY);
-        verify(outboundSoapClient).send(ENDPOINT, "<pong/>", CPA_ID, FROM_PARTY);
+        verify(outboundSoapClient).send(ENDPOINT, "<pong/>", CPA_ID, TO_PARTY, FROM_PARTY);
     }
 
     @Test
@@ -92,7 +93,7 @@ class PingSendingServiceTest {
         service.handleAsyncPong(
             EbmsAsyncPongMessage.builder().pingHeader(pingHeader).build(), amqpChannel, 7L);
 
-        verify(outboundSoapClient).send(ENDPOINT, "<pong/>", CPA_ID, FROM_PARTY);
+        verify(outboundSoapClient).send(ENDPOINT, "<pong/>", CPA_ID, TO_PARTY, FROM_PARTY);
         verify(amqpChannel).basicAck(7L, false);
     }
 

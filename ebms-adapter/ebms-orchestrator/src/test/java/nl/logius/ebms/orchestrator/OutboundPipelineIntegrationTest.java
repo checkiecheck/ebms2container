@@ -126,7 +126,7 @@ class OutboundPipelineIntegrationTest {
         drainQueue(RabbitMqConfig.QUEUE_DLQ);
 
         // Standaard: send retourneert null (return-waarde niet gebruikt door service)
-        when(outboundSoapClient.send(anyString(), anyString(), anyString(), anyString())).thenReturn(null);
+        when(outboundSoapClient.send(anyString(), anyString(), anyString(), anyString(), anyString())).thenReturn(null);
 
         // Standaard: sign-mock geeft gemarkeerde XML terug voor traceerbaarheid
         when(cryptoServiceClient.sign(anyString(), anyString(), anyString()))
@@ -156,7 +156,7 @@ class OutboundPipelineIntegrationTest {
         verifyNoInteractions(cryptoServiceClient);
 
         // SOAP verzonden naar juist endpoint
-        verify(outboundSoapClient).send(eq(ENDPOINT), anyString(), anyString(), anyString());
+        verify(outboundSoapClient).send(eq(ENDPOINT), anyString(), anyString(), anyString(), anyString());
 
         // DB: velden correct opgeslagen
         EbmsMessageEntity entity = messageRepository.findByMessageIdAndDirection(msgId, MessageDirection.OUTBOUND).orElseThrow();
@@ -183,7 +183,7 @@ class OutboundPipelineIntegrationTest {
         awaitStatus(msgId, MessageStatus.SENT);
 
         verifyNoInteractions(cryptoServiceClient);
-        verify(outboundSoapClient).send(eq(ENDPOINT), anyString(), anyString(), anyString());
+        verify(outboundSoapClient).send(eq(ENDPOINT), anyString(), anyString(), anyString(), anyString());
 
         // RM: AckRequested=true, status SENT (niet DELIVERED)
         EbmsMessageEntity entity = messageRepository.findByMessageIdAndDirection(msgId, MessageDirection.OUTBOUND).orElseThrow();
@@ -211,7 +211,7 @@ class OutboundPipelineIntegrationTest {
 
         // Verstuurde SOAP bevat de ondertekende inhoud
         verify(outboundSoapClient).send(eq(ENDPOINT), argThat(xml -> xml.startsWith("SIGNED:")),
-            anyString(), anyString());
+            anyString(), anyString(), anyString());
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -259,7 +259,7 @@ class OutboundPipelineIntegrationTest {
         verify(outboundSoapClient).send(
             eq(ENDPOINT),
             argThat(xml -> xml.startsWith("ENCRYPTED:SIGNED:")),
-            anyString(), anyString());
+            anyString(), anyString(), anyString());
 
         // RM: AckRequested=true + SENT-status
         EbmsMessageEntity entity = messageRepository.findByMessageIdAndDirection(msgId, MessageDirection.OUTBOUND).orElseThrow();
@@ -305,7 +305,7 @@ class OutboundPipelineIntegrationTest {
         configureChannel("osb-be");
 
         // Eerste aanroep gooit exception, tweede succesvol (simuleert transient fout)
-        when(outboundSoapClient.send(anyString(), anyString(), anyString(), anyString()))
+        when(outboundSoapClient.send(anyString(), anyString(), anyString(), anyString(), anyString()))
             .thenThrow(new nl.logius.ebms.common.exception.EbmsException("CONNECTION_ERROR",
                 "Simuleer verbindingsfout"))
             .thenReturn(null);
@@ -316,7 +316,7 @@ class OutboundPipelineIntegrationTest {
         awaitStatus(msgId, MessageStatus.DELIVERED);
 
         // send moet precies twee keer aangeroepen zijn
-        verify(outboundSoapClient, times(2)).send(eq(ENDPOINT), anyString(), anyString(), anyString());
+        verify(outboundSoapClient, times(2)).send(eq(ENDPOINT), anyString(), anyString(), anyString(), anyString());
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -389,7 +389,7 @@ class OutboundPipelineIntegrationTest {
 
         // Verify per bericht
         assertThat(messageRepository.count()).isGreaterThanOrEqualTo(5);
-        verify(outboundSoapClient, times(5)).send(eq(ENDPOINT), anyString(), anyString(), anyString());
+        verify(outboundSoapClient, times(5)).send(eq(ENDPOINT), anyString(), anyString(), anyString(), anyString());
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

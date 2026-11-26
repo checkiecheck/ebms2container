@@ -115,6 +115,13 @@
             <scope>test</scope>
         </dependency>
 
+        <!-- ── Bouncy Castle – ALLEEN test scope: genereren van test-CA's/servercerts voor mTLS-tests ── -->
+        <dependency>
+            <groupId>org.bouncycastle</groupId>
+            <artifactId>bcpkix-jdk18on</artifactId>
+            <scope>test</scope>
+        </dependency>
+
         <!-- ── Awaitility – asynchrone asserties in @RabbitListener-tests ── -->
         <dependency>
             <groupId>org.awaitility</groupId>

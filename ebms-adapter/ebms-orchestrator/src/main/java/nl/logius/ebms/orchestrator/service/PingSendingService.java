@@ -73,6 +73,7 @@ public class PingSendingService {
             channel.getEndpointUrl(),
             soapHelper.soapToString(pong),
             pingHeader.getCpaId(),
+            pingHeader.getTo().isEmpty() ? null : pingHeader.getTo().get(0).getValue(),
             fromPartyId);
         log.info("[PING] Asynchrone Pong verstuurd: messageId={} naar endpoint={}",
             messageId(pingHeader), channel.getEndpointUrl());

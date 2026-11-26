@@ -37,7 +37,7 @@ class ConnectivityPingServiceTest {
 
     @Test
     void ping_validPong_returnsSuccessWithLatency() {
-        when(outboundSoapClient.send(anyString(), anyString(), anyString(), anyString()))
+        when(outboundSoapClient.send(anyString(), anyString(), anyString(), anyString(), anyString()))
             .thenAnswer(invocation -> pongFor(invocation.getArgument(1), false, false));
 
         ConnectivityPingResult result = service.ping(CPA_ID, FROM_PARTY, TO_PARTY);
@@ -50,7 +50,7 @@ class ConnectivityPingServiceTest {
 
     @Test
     void ping_pongWithWrongCorrelation_returnsInvalidPong() {
-        when(outboundSoapClient.send(anyString(), anyString(), anyString(), anyString()))
+        when(outboundSoapClient.send(anyString(), anyString(), anyString(), anyString(), anyString()))
             .thenAnswer(invocation -> pongFor(invocation.getArgument(1), true, false));
 
         ConnectivityPingResult result = service.ping(CPA_ID, FROM_PARTY, TO_PARTY);
@@ -62,7 +62,7 @@ class ConnectivityPingServiceTest {
 
     @Test
     void ping_responseWithWrongAction_returnsInvalidPong() {
-        when(outboundSoapClient.send(anyString(), anyString(), anyString(), anyString()))
+        when(outboundSoapClient.send(anyString(), anyString(), anyString(), anyString(), anyString()))
             .thenAnswer(invocation -> pongFor(invocation.getArgument(1), false, true));
 
         ConnectivityPingResult result = service.ping(CPA_ID, FROM_PARTY, TO_PARTY);
@@ -74,7 +74,7 @@ class ConnectivityPingServiceTest {
 
     @Test
     void ping_sslHandshakeFailure_preservesExactCause() {
-        when(outboundSoapClient.send(anyString(), anyString(), anyString(), anyString()))
+        when(outboundSoapClient.send(anyString(), anyString(), anyString(), anyString(), anyString()))
             .thenThrow(new EbmsException("CONNECTION_ERROR",
                 "SOAP-verzending mislukt: SSLHandshakeException: PKIX path building failed"));
 

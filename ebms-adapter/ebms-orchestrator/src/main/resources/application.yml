@@ -79,6 +79,10 @@ cxf:
 ebms:
   cpa-service-url: ${CPA_SERVICE_URL:http://localhost:8081}
   crypto-service-url: ${CRYPTO_SERVICE_URL:http://localhost:8082}
+  mtls:
+    # Fallback key-alias voor outbound mTLS, alleen gebruikt als de CPA geen (in de keystore
+    # aanwezig) eigen certificaat specificeert; daarna volgt ebms.outbound.signing-key-alias.
+    client-key-alias: ${EBMS_MTLS_CLIENT_KEY_ALIAS:orchestrator-key}
   reliable-messaging:
     retry-interval-seconds: 60
     max-retries: 3
@@ -93,6 +97,13 @@ ebms:
       keystore-password: ${KEYSTORE_PASSWORD:}
       truststore-path: ${TRUSTSTORE_PATH:}
       truststore-password: ${TRUSTSTORE_PASSWORD:}
+      # Server-TLS: truststore.p12 + standaard JVM-truststore (publieke CA's zoals DigiCert)
+      include-jvm-default-trust: ${EBMS_OUTBOUND_SSL_INCLUDE_JVM_TRUST:true}
+      # CPA-partnercertificaat (berichtlaag) ook als TLS trust-anchor; alleen voor zelf-ondertekende testpartners
+      trust-cpa-certificates: ${EBMS_OUTBOUND_SSL_TRUST_CPA_CERTS:false}
+      # Afwijzen i.p.v. waarschuwen als OIN in clientcert niet overeenkomt met eigen partij
+      enforce-client-oin-match: ${EBMS_OUTBOUND_SSL_ENFORCE_OIN:false}
+      context-cache-ttl-seconds: ${EBMS_OUTBOUND_SSL_CACHE_TTL_SECONDS:600}
   inbound:
     decryption-key-alias: ${EBMS_DECRYPTION_KEY_ALIAS:encryption-key}
   security:
