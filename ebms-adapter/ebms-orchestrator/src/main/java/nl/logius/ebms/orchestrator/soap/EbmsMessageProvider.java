@@ -51,6 +51,11 @@ public class EbmsMessageProvider implements Provider<SOAPMessage> {
         EbxmlMessageHeader header = null;
         String messageId = null;
 
+        if (request == null) {
+            // GET/HEAD/DELETE of lege POST: CXF levert dan geen SOAP-bericht aan.
+            return rejectRequestWithoutSoapMessage(clientOin);
+        }
+
         try {
             SOAPHeader soapHeader = request.getSOAPHeader();
             if (soapHeader == null) {
@@ -108,6 +113,35 @@ public class EbmsMessageProvider implements Provider<SOAPMessage> {
             return soapHelper.createErrorResponse(
                 "Unknown", "Message could not be processed", messageId);
         }
+    }
+
+    /** 405 (met {@code Allow: POST}) voor een niet-POST, anders 400 voor een lege POST-body. */
+    private SOAPMessage rejectRequestWithoutSoapMessage(String clientOin) {
+        String method = null;
+        if (wsContext != null) {
+            Object value = wsContext.getMessageContext().get(MessageContext.HTTP_REQUEST_METHOD);
+            method = value == null ? null : value.toString();
+        }
+        boolean wrongMethod = method != null && !"POST".equalsIgnoreCase(method);
+        int status = wrongMethod ? 405 : 400;
+        log.warn("Request zonder SOAP-bericht afgewezen met HTTP {}: method={} clientOin={}",
+            status, method, clientOin);
+
+        setHttpResponseCode(status);
+        if (wsContext != null
+                && wsContext.getMessageContext().get(MessageContext.SERVLET_RESPONSE)
+                    instanceof HttpServletResponse response) {
+            if (wrongMethod) {
+                response.setHeader("Allow", "POST");
+            }
+            try {
+                // Zonder commit vervangt CXF een null Provider-response door HTTP 202.
+                response.flushBuffer();
+            } catch (java.io.IOException e) {
+                log.debug("HTTP {}-response kon niet worden gecommit: {}", status, e.getMessage());
+            }
+        }
+        return null;
     }
 
     private String externalErrorDescription(EbmsException exception) {
